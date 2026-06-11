@@ -1,6 +1,7 @@
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <cmath>
+#include <string>
 #include <vector>
 #include <algorithm>
 #include <iomanip>
@@ -21,12 +22,6 @@ struct ScaleCalibration {
     bool valid;
 };
 
-struct CalibrationPoints {
-    cv::Point pt0;   // position of number "0"
-    cv::Point pt4;   // position of number "4"
-    bool valid;
-};
-
 struct TickMark {
     double angle;       // radians
     double angularWidth; // radians
@@ -36,25 +31,6 @@ struct TickMark {
 
 static const double PI = 3.14159265358979323846;
 
-// Mouse callback for manual calibration
-static CalibrationPoints gCalibPoints;
-static int gCalibStage = 0;  // 0=not started, 1=waiting for 1, 2=waiting for 4, 3=done
-
-static void onMouseClick(int event, int x, int y, int flags, void *userdata) {
-    if (event == cv::EVENT_LBUTTONDOWN && gCalibStage < 3) {
-        if (gCalibStage == 1) {
-            gCalibPoints.pt0 = cv::Point(x, y);
-            std::cout << "  >> Number '0' marked at (" << x << ", " << y << ")\n";
-            std::cout << "  >> Now click on number '4'...\n";
-            gCalibStage = 2;
-        } else if (gCalibStage == 2) {
-            gCalibPoints.pt4 = cv::Point(x, y);
-            std::cout << "  >> Number '4' marked at (" << x << ", " << y << ")\n";
-            gCalibPoints.valid = true;
-            gCalibStage = 3;
-        }
-    }
-}
 
 static cv::Point gCircleCenter;
 static int gCircleRadius = 0;
@@ -387,58 +363,10 @@ std::vector<TickMark> scanRingAtRadius(const cv::Mat &frame, const GaugeROI &gau
     return marks;
 }
 
-// Cluster markings into groups by angular proximity.
-// Returns a vector of aggregated marks (one per cluster).
-std::vector<TickMark> clusterMarkings(const std::vector<TickMark> &marks) {
-    if (marks.empty()) return {};
-
-    std::vector<TickMark> sorted = marks;
-    std::sort(sorted.begin(), sorted.end(),
-              [](const TickMark &a, const TickMark &b) { return a.angle < b.angle; });
-
-    // Compute median angular gap to determine clustering threshold
-    std::vector<double> gaps;
-    for (size_t i = 1; i < sorted.size(); i++) {
-        gaps.push_back(sorted[i].angle - sorted[i - 1].angle);
-    }
-    // Handle wrap-around
-    gaps.push_back((2.0 * PI - sorted.back().angle) + sorted.front().angle);
-
-    std::sort(gaps.begin(), gaps.end());
-    double medianGap = gaps[gaps.size() / 2];
-
-    // Gap threshold: 3x the median gap separates major groups (numbers)
-    double gapThreshold = medianGap * 3.0;
-
-    std::vector<TickMark> clusters;
-    double sumAngle = sorted[0].angle * sorted[0].prominence;
-    double sumProminence = sorted[0].prominence;
-    int clusterCount = 1;
-
-    for (size_t i = 1; i < sorted.size(); i++) {
-        double gap = sorted[i].angle - sorted[i - 1].angle;
-        if (gap > gapThreshold) {
-            double avgAngle = sumAngle / sumProminence;
-            clusters.push_back({avgAngle, 0, sumProminence / clusterCount, sorted[i - 1].distance});
-            sumAngle = sorted[i].angle * sorted[i].prominence;
-            sumProminence = sorted[i].prominence;
-            clusterCount = 1;
-        } else {
-            sumAngle += sorted[i].angle * sorted[i].prominence;
-            sumProminence += sorted[i].prominence;
-            clusterCount++;
-        }
-    }
-
-    double avgAngle = sumAngle / sumProminence;
-    clusters.push_back({avgAngle, 0, sumProminence / clusterCount, sorted.back().distance});
-
-    return clusters;
-}
-
 // Refine detected markings using the even-spacing constraint.
 // Removes outliers and fills in undetected markings.
-std::vector<TickMark> refineEvenSpacing(const std::vector<TickMark> &marks) {
+// maxMarks caps the total number of grid positions generated.
+std::vector<TickMark> refineEvenSpacing(const std::vector<TickMark> &marks, int maxMarks = 40) {
     if (marks.size() < 3) return marks;
 
     std::vector<double> angles;
@@ -462,6 +390,7 @@ std::vector<TickMark> refineEvenSpacing(const std::vector<TickMark> &marks) {
     double baseSpacing = gaps[gaps.size() / 2];
     int totalMarks = cvRound(2.0 * PI / baseSpacing);
     if (totalMarks < 3) return marks;
+    totalMarks = std::min(totalMarks, maxMarks);
     baseSpacing = 2.0 * PI / totalMarks;
 
     // Find the best offset by testing each detected marking
@@ -517,28 +446,6 @@ std::vector<TickMark> refineEvenSpacing(const std::vector<TickMark> &marks) {
     return refined;
 }
 
-// Given markings from a ring scan, identify the scale endpoints (0 and 4).
-// Returns the angles of the first and last major marking clusters.
-ScaleCalibration calibrateFromMarkings(const std::vector<TickMark> &marks) {
-    ScaleCalibration calib = {0, 0, 0, 4, false};
-    if (marks.size() < 4) return calib;
-
-    std::vector<TickMark> clusters = clusterMarkings(marks);
-    if (clusters.size() < 2) return calib;
-
-    // Sort clusters by angle
-    std::sort(clusters.begin(), clusters.end(),
-              [](const TickMark &a, const TickMark &b) { return a.angle < b.angle; });
-
-    // The first and last clusters are the scale endpoints (0 and 4)
-    calib.startAngle = clusters.front().angle;
-    calib.endAngle = clusters.back().angle;
-    calib.minValue = 0;
-    calib.maxValue = 4;
-    calib.valid = true;
-
-    return calib;
-}
 
 // Map the needle angle to a gauge value
 double angleToValue(double needleAngle, const ScaleCalibration &scale,
@@ -600,7 +507,7 @@ void drawOverlay(cv::Mat &frame, const GaugeROI &gauge,
                 gauge.center.x + cvRound(gauge.radius * 0.85 * std::cos(scale.startAngle)),
                 gauge.center.y + cvRound(gauge.radius * 0.85 * std::sin(scale.startAngle)));
             cv::line(frame, gauge.center, startPt, cv::Scalar(0, 255, 0), 2);
-            cv::putText(frame, "0", startPt + cv::Point(10, 0),
+            cv::putText(frame, std::to_string(scale.minValue), startPt + cv::Point(10, 0),
                         cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
 
             // Draw end angle line (red for "4")
@@ -608,7 +515,7 @@ void drawOverlay(cv::Mat &frame, const GaugeROI &gauge,
                 gauge.center.x + cvRound(gauge.radius * 0.85 * std::cos(scale.endAngle)),
                 gauge.center.y + cvRound(gauge.radius * 0.85 * std::sin(scale.endAngle)));
             cv::line(frame, gauge.center, endPt, cv::Scalar(0, 0, 255), 2);
-            cv::putText(frame, "4", endPt + cv::Point(10, 0),
+            cv::putText(frame, std::to_string(scale.maxValue) , endPt + cv::Point(10, 0),
                         cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 255), 2);
         }
 
@@ -636,6 +543,20 @@ static void onMarkClick(int event, int x, int y, int flags, void *userdata) {
     if (event == cv::EVENT_LBUTTONDOWN && !gMarkClicked) {
         gMarkClick = cv::Point(x, y);
         gMarkClicked = true;
+    }
+}
+
+// Calibration state
+static int gCalibTrackMin = 0;   // min value * 100
+static int gCalibTrackMax = 400; // max value * 100
+static cv::Point gCalibPt;
+static int gCalibPhase = 0;   // 0=wait min click, 1=wait max click, 2=both set
+static bool gCalibClickDone = false;
+
+static void onCalibClick(int event, int x, int y, int flags, void *userdata) {
+    if (event == cv::EVENT_LBUTTONDOWN && gCalibPhase < 2) {
+        gCalibPt = cv::Point(x, y);
+        gCalibClickDone = true;
     }
 }
 
@@ -682,12 +603,14 @@ int main(int argc, char **argv) {
     std::cout << "\nCalibration: click on ANY marking on the gauge scale.\n";
     std::cout << "  (a tick mark, a number, anything on the printed scale)\n";
 
-    cv::namedWindow("Calibration");
-    cv::setMouseCallback("Calibration", onMarkClick, nullptr);
-
-    gMarkClicked = false;
     cv::Mat calibFrame = frame.clone();
     cv::circle(calibFrame, gauge.center, gauge.radius, cv::Scalar(0, 255, 0), 2);
+
+    cv::namedWindow("Calibration", cv::WINDOW_NORMAL);
+    cv::resizeWindow("Calibration", calibFrame.cols, calibFrame.rows + 80);
+    cv::createTrackbar("Min value (x100)", "Calibration", &gCalibTrackMin, 10000);
+    cv::createTrackbar("Max value (x100)", "Calibration", &gCalibTrackMax, 10000);
+    cv::setMouseCallback("Calibration", onMarkClick, nullptr);
 
     while (!gMarkClicked) {
         cv::Mat disp = calibFrame.clone();
@@ -717,12 +640,10 @@ int main(int argc, char **argv) {
     std::cout << "  >> Found " << marks.size() << " raw markings.\n";
 
     // Refine using even-spacing constraint
-    std::vector<TickMark> refinedMarks = refineEvenSpacing(marks);
-    std::cout << "  >> Refined to " << refinedMarks.size() << " evenly-spaced markings.\n";
-
-    if (refinedMarks.size() >= 4) {
-        scale = calibrateFromMarkings(refinedMarks);
-    }
+    int totalScaleMarks = 40;
+    std::vector<TickMark> refinedMarks = refineEvenSpacing(marks, totalScaleMarks);
+    std::cout << "  >> Refined to " << refinedMarks.size() << "/" << totalScaleMarks
+              << " evenly-spaced markings.\n";
 
     // Draw marking positions for visual feedback (raw vs refined)
     cv::Mat markDisp = frame.clone();
@@ -738,61 +659,84 @@ int main(int argc, char **argv) {
             cvRound(gauge.center.y + scanRadius * std::sin(m.angle)));
         cv::circle(markDisp, pt, 5, cv::Scalar(0, 255, 0), -1);  // green = refined
     }
-    cv::putText(markDisp, "Red=raw, Green=refined (evenly spaced). Press any key.",
+    cv::putText(markDisp, "Red=raw, Green=refined. Press any key.",
                 cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
                 cv::Scalar(0, 255, 255), 2);
     cv::imshow("Calibration", markDisp);
     cv::waitKey(0);
-    cv::destroyWindow("Calibration");
 
-    if (!scale.valid) {
-        std::cout << "  >> Auto-detection of scale boundaries failed.\n";
-        std::cout << "  >> Falling back to manual: click on number 0, then 4.\n";
+    // Step 4: Interactive calibration — trackbars already exist from creation above
+    gCalibPhase = 0;
+    gCalibClickDone = false;
+    gCalibTrackMin = 0;
+    gCalibTrackMax = 400;
+    cv::setTrackbarPos("Min value (x100)", "Calibration", gCalibTrackMin);
+    cv::setTrackbarPos("Max value (x100)", "Calibration", gCalibTrackMax);
+    cv::Point ptMin, ptMax;
+    bool confirmed = false;
 
-        gCalibStage = 1;
-        gCalibPoints = {cv::Point(0, 0), cv::Point(0, 0), false};
+    cv::setMouseCallback("Calibration", onCalibClick, nullptr);
 
-        cv::namedWindow("Manual Calibration");
-        cv::setMouseCallback("Manual Calibration", onMouseClick, nullptr);
+    while (!confirmed) {
+        cv::Mat disp = markDisp.clone();
 
-        cv::Mat manualFrame = frame.clone();
-        cv::circle(manualFrame, gauge.center, gauge.radius, cv::Scalar(0, 255, 0), 2);
+        if (gCalibPhase == 0) {
+            cv::putText(disp, "Click on the MINIMUM value marking",
+                        cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                        cv::Scalar(0, 255, 255), 2);
+        } else if (gCalibPhase == 1) {
+            cv::circle(disp, ptMin, 10, cv::Scalar(0, 255, 255), 2);
+            cv::putText(disp, "Now click on the MAXIMUM value marking",
+                        cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                        cv::Scalar(0, 255, 255), 2);
+        } else {
+            cv::circle(disp, ptMin, 10, cv::Scalar(0, 255, 0), 2);
+            cv::circle(disp, ptMax, 10, cv::Scalar(0, 0, 255), 2);
+            std::ostringstream oss;
+            oss << "Min=" << std::fixed << std::setprecision(2)
+                << (gCalibTrackMin / 100.0)
+                << "  Max=" << (gCalibTrackMax / 100.0);
+            cv::putText(disp, oss.str(), cv::Point(30, 30),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
+            cv::putText(disp, "Adjust sliders, then press ENTER to confirm",
+                        cv::Point(30, 65), cv::FONT_HERSHEY_SIMPLEX, 0.5,
+                        cv::Scalar(200, 200, 200), 1);
+        }
 
-        while (gCalibStage < 3) {
-            cv::Mat disp = manualFrame.clone();
-            if (gCalibStage == 1) {
-                cv::putText(disp, "Click on number '0'", cv::Point(30, 30),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
-            } else if (gCalibStage == 2) {
-                cv::circle(disp, gCalibPoints.pt0, 5, cv::Scalar(0, 255, 0), -1);
-                cv::putText(disp, "0", gCalibPoints.pt0 + cv::Point(10, 0),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
-                cv::putText(disp, "Click on number '4'", cv::Point(30, 30),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
+        cv::imshow("Calibration", disp);
+
+        if (gCalibClickDone) {
+            if (gCalibPhase == 0) {
+                ptMin = gCalibPt;
+                std::cout << "  >> Min marking at (" << ptMin.x << ", " << ptMin.y << ")\n";
+                gCalibPhase = 1;
+            } else if (gCalibPhase == 1) {
+                ptMax = gCalibPt;
+                std::cout << "  >> Max marking at (" << ptMax.x << ", " << ptMax.y << ")\n";
+                gCalibPhase = 2;
             }
-            cv::imshow("Manual Calibration", disp);
-            int key = cv::waitKey(30);
-            if (key == 'c' || key == 'C') break;
+            gCalibClickDone = false;
         }
 
-        cv::destroyWindow("Manual Calibration");
-
-        if (gCalibPoints.valid) {
-            scale.startAngle = std::atan2(gCalibPoints.pt0.y - gauge.center.y,
-                                           gCalibPoints.pt0.x - gauge.center.x);
-            scale.endAngle = std::atan2(gCalibPoints.pt4.y - gauge.center.y,
-                                         gCalibPoints.pt4.x - gauge.center.x);
-            scale.minValue = 0;
-            scale.maxValue = 4;
-            scale.valid = true;
-        }
+        int key = cv::waitKey(30);
+        if ((key == 13 || key == 32) && gCalibPhase == 2) confirmed = true;
+        if (key == 27) break;
     }
 
-    if (scale.valid) {
-        std::cout << "  >> Scale calibrated: 0 at " << (scale.startAngle * 180.0 / PI)
-                  << " deg, 4 at " << (scale.endAngle * 180.0 / PI) << " deg\n";
+    cv::destroyWindow("Calibration");
+
+    scale.startAngle = std::atan2(ptMin.y - gauge.center.y, ptMin.x - gauge.center.x);
+    scale.endAngle = std::atan2(ptMax.y - gauge.center.y, ptMax.x - gauge.center.x);
+    scale.minValue = gCalibTrackMin / 100.0;
+    scale.maxValue = gCalibTrackMax / 100.0;
+    scale.valid = confirmed;
+
+    if (confirmed) {
+        std::cout << "  >> Scale calibrated: " << scale.minValue << " at "
+                  << (scale.startAngle * 180.0 / PI) << " deg, " << scale.maxValue
+                  << " at " << (scale.endAngle * 180.0 / PI) << " deg\n";
     } else {
-        std::cerr << "Calibration failed.\n";
+        std::cerr << "Calibration cancelled.\n";
         return -1;
     }
 
