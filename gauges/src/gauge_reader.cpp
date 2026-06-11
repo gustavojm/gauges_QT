@@ -15,8 +15,8 @@ struct GaugeROI {
 };
 
 struct ScaleCalibration {
-    double startAngle;    // radians, angle for number "1"
-    double endAngle;      // radians, angle for number "4"
+    double startAngle;    // radians
+    double endAngle;      // radians
     double minValue;
     double maxValue;
     bool valid;
@@ -528,7 +528,7 @@ void drawOverlay(cv::Mat &frame, const GaugeROI &gauge,
 
 
 static int gCalibTrackMin = 0;
-static int gCalibTrackMax = 400;
+static int gCalibTrackMax = 4;
 static cv::Point gCalibPt;
 static int gCalibPhase = 0;   // 0=min mark, 1=max mark, 2=done
 static bool gCalibClickDone = false;
@@ -570,8 +570,8 @@ int main(int argc, char **argv) {
 
     cv::namedWindow(winName, cv::WINDOW_NORMAL);
     cv::resizeWindow(winName, frame.cols, frame.rows + 80);
-    cv::createTrackbar("Min value", winName, &gCalibTrackMin, 400);
-    cv::createTrackbar("Max value", winName, &gCalibTrackMax, 400);
+    cv::createTrackbar("Min value", winName, &gCalibTrackMin, 1000);
+    cv::createTrackbar("Max value", winName, &gCalibTrackMax, 1000);
 
     std::cout << "Detecting gauge circle...\n";
     std::vector<GaugeROI> gauges = detectGaugeCircles(frame, winName);
@@ -593,8 +593,6 @@ int main(int argc, char **argv) {
 
     gCalibPhase = 0;
     gCalibClickDone = false;
-    gCalibTrackMin = 0;
-    gCalibTrackMax = 400;
     cv::setTrackbarPos("Min value", winName, gCalibTrackMin);
     cv::setTrackbarPos("Max value", winName, gCalibTrackMax);
     bool confirmed = false;
@@ -615,9 +613,8 @@ int main(int argc, char **argv) {
             cv::circle(disp, gPtMin, 10, cv::Scalar(0, 255, 0), 2);
             cv::circle(disp, gPtMax, 10, cv::Scalar(0, 0, 255), 2);
             std::ostringstream oss;
-            oss << "Min=" << std::fixed << std::setprecision(2)
-                << (gCalibTrackMin / 100.0)
-                << "  Max=" << (gCalibTrackMax / 100.0);
+            oss << "Min=" << (gCalibTrackMin)
+                << "  Max=" << (gCalibTrackMax);
             cv::putText(disp, oss.str(), cv::Point(30, 30),
                         cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
             cv::putText(disp, "Adjust sliders, then press ENTER to confirm",
@@ -649,8 +646,8 @@ int main(int argc, char **argv) {
 
     scale.startAngle = std::atan2(gPtMin.y - gauge.center.y, gPtMin.x - gauge.center.x);
     scale.endAngle = std::atan2(gPtMax.y - gauge.center.y, gPtMax.x - gauge.center.x);
-    scale.minValue = gCalibTrackMin / 100.0;
-    scale.maxValue = gCalibTrackMax / 100.0;
+    scale.minValue = gCalibTrackMin;
+    scale.maxValue = gCalibTrackMax;
     scale.valid = confirmed;
 
     if (confirmed) {
