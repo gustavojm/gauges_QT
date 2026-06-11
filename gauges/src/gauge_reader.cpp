@@ -84,79 +84,153 @@ cv::Mat createGaugeMask(const cv::Mat &frame, const GaugeROI &gauge) {
     return mask;
 }
 
-// Detect the needle angle using line detection and center-proximity filtering
-double detectNeedleAngle(const cv::Mat &frame, const GaugeROI &gauge) {
-    cv::Mat gray, blurred, edges;
+// Try to detect a colored needle (e.g., red) using HSV color segmentation
+double detectColoredNeedle(const cv::Mat &frame, const GaugeROI &gauge) {
+    cv::Mat mask = createGaugeMask(frame, gauge);
+    cv::Mat masked;
+    frame.copyTo(masked, mask);
+
+    cv::Mat hsv;
+    cv::cvtColor(masked, hsv, cv::COLOR_BGR2HSV);
+
+    // Red: two ranges in HSV (wraps around hue 0)
+    cv::Mat red1, red2, redMask;
+    cv::inRange(hsv, cv::Scalar(0, 50, 50), cv::Scalar(10, 255, 255), red1);
+    cv::inRange(hsv, cv::Scalar(160, 50, 50), cv::Scalar(179, 255, 255), red2);
+    cv::bitwise_or(red1, red2, redMask);
+
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
+    cv::morphologyEx(redMask, redMask, cv::MORPH_CLOSE, kernel);
+    cv::morphologyEx(redMask, redMask, cv::MORPH_OPEN, kernel);
+
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(redMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+    if (contours.empty()) return -1;
+
+    int bestIdx = -1;
+    double bestScore = 0;
+
+    for (size_t i = 0; i < contours.size(); i++) {
+        double area = cv::contourArea(contours[i]);
+        if (area < gauge.radius * 0.5) continue;
+
+        cv::Moments m = cv::moments(contours[i]);
+        if (m.m00 == 0) continue;
+        cv::Point centroid(cvRound(m.m10 / m.m00), cvRound(m.m01 / m.m00));
+        double distFromCenter = cv::norm(centroid - gauge.center);
+
+        if (distFromCenter > gauge.radius * 0.6) continue;
+
+        // Find the point farthest from center (needle tip)
+        double maxDist = 0;
+        for (const auto &pt : contours[i]) {
+            double d = cv::norm(pt - gauge.center);
+            if (d > maxDist) maxDist = d;
+        }
+
+        // Score: large area + extends far from center
+        double score = maxDist * std::log(area + 1);
+        if (score > bestScore) {
+            bestScore = score;
+            bestIdx = i;
+        }
+    }
+
+    if (bestIdx < 0) return -1;
+
+    // Compute angle from center to the farthest point of the needle contour
+    double maxDist = 0;
+    cv::Point tip;
+    for (const auto &pt : contours[bestIdx]) {
+        double d = cv::norm(pt - gauge.center);
+        if (d > maxDist) {
+            maxDist = d;
+            tip = pt;
+        }
+    }
+
+    return std::atan2(tip.y - gauge.center.y, tip.x - gauge.center.x);
+}
+
+// Detect the needle angle using a radial scan approach.
+// For each angle, scan from near-center outward and measure how much dark
+// pixels (needle body) are found. The needle produces a long solid dark run,
+// while tick marks and numbers only produce short dark segments at the periphery.
+double detectNeedleRadial(const cv::Mat &frame, const GaugeROI &gauge) {
+    cv::Mat gray;
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-    cv::GaussianBlur(gray, blurred, cv::Size(5, 5), 1, 1);
 
     cv::Mat mask = createGaugeMask(frame, gauge);
     cv::Mat masked;
     gray.copyTo(masked, mask);
 
-    // Use adaptive threshold to handle varying lighting
-    cv::Mat thresh;
-    cv::adaptiveThreshold(masked, thresh, 255,
-                          cv::ADAPTIVE_THRESH_GAUSSIAN_C,
-                          cv::THRESH_BINARY_INV, 31, 5);
+    cv::Mat blurred;
+    cv::GaussianBlur(masked, blurred, cv::Size(5, 5), 0);
 
-    // Morphology to clean up noise
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
-    cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, kernel);
-    cv::morphologyEx(thresh, thresh, cv::MORPH_OPEN, kernel);
+    cv::Mat binary;
+    cv::adaptiveThreshold(blurred, binary, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C,
+                          cv::THRESH_BINARY_INV, 25, 8);
 
-    cv::Canny(thresh, edges, 50, 150, 3);
-
-    std::vector<cv::Vec4i> lines;
-    cv::HoughLinesP(edges, lines, 1, PI / 180, static_cast<int>(gauge.radius * 0.08),
-                    static_cast<int>(gauge.radius * 0.1),
-                    static_cast<int>(gauge.radius * 0.2));
-
-    if (lines.empty()) {
-        return -1;
-    }
-
-    // Filter lines that pass close to center and are long enough
+    int numAngles = 360;
     double bestScore = 0;
     double bestAngle = -1;
 
-    for (const auto &line : lines) {
-        cv::Point p1(line[0], line[1]);
-        cv::Point p2(line[2], line[3]);
+    int startR = cvRound(gauge.radius * 0.08);
+    int endR = gauge.radius;
 
-        double len = cv::norm(p1 - p2);
-        if (len < gauge.radius * 0.7) continue;
+    for (int i = 0; i < numAngles; i++) {
+        double angle = 2.0 * PI * i / numAngles;
+        int darkRun = 0;
+        int longestRun = 0;
+        int totalDark = 0;
+        int totalScan = 0;
+        bool inRun = false;
 
-        // Find closest point on line to gauge center
-        cv::Point diff = p2 - p1;
-        double t = ((gauge.center.x - p1.x) * diff.x + (gauge.center.y - p1.y) * diff.y)
-                   / (diff.x * diff.x + diff.y * diff.y);
-        t = std::clamp(t, 0.0, 1.0);
-        cv::Point closest(p1.x + cvRound(t * diff.x), p1.y + cvRound(t * diff.y));
-        double distToCenter = cv::norm(closest - gauge.center);
+        for (int r = startR; r < endR; r++) {
+            int x = cvRound(gauge.center.x + r * std::cos(angle));
+            int y = cvRound(gauge.center.y + r * std::sin(angle));
 
-        if (distToCenter > gauge.radius * 0.15) continue;
+            if (x < 0 || x >= binary.cols || y < 0 || y >= binary.rows) break;
+            if (mask.at<uchar>(y, x) == 0) break;
 
-        // Score: prefer lines that are long, pass close to center, and extend toward edge
-        double midX = (p1.x + p2.x) / 2.0;
-        double midY = (p1.y + p2.y) / 2.0;
-        double distMidToCenter = cv::norm(cv::Point(cvRound(midX), cvRound(midY)) - gauge.center);
+            totalScan++;
+            bool isDark = (binary.at<uchar>(y, x) > 0);
 
-        double reach = len * (1.0 - distMidToCenter / gauge.radius);
-        double score = reach * (1.0 - distToCenter / gauge.radius);
+            if (isDark) {
+                totalDark++;
+                if (!inRun) {
+                    inRun = true;
+                    darkRun = 1;
+                } else {
+                    darkRun++;
+                }
+                if (darkRun > longestRun) longestRun = darkRun;
+            } else {
+                inRun = false;
+            }
+        }
+        if (inRun && darkRun > longestRun) longestRun = darkRun;
+
+        // Score combines: long continuous dark run + high dark pixel density
+        double density = (totalScan > 0) ? (static_cast<double>(totalDark) / totalScan) : 0;
+        double reach = (totalScan > 0) ? (static_cast<double>(longestRun) / gauge.radius) : 0;
+        double score = density * 0.4 + reach * 0.6;
 
         if (score > bestScore) {
             bestScore = score;
-
-            // Angle from center to the farthest endpoint of the line
-            double d1 = cv::norm(p1 - gauge.center);
-            double d2 = cv::norm(p2 - gauge.center);
-            cv::Point tip = (d1 > d2) ? p1 : p2;
-            bestAngle = std::atan2(tip.y - gauge.center.y, tip.x - gauge.center.x);
+            bestAngle = angle;
         }
     }
 
     return bestAngle;
+}
+
+// Detect the needle angle by trying multiple methods
+double detectNeedleAngle(const cv::Mat &frame, const GaugeROI &gauge) {
+    double angle = detectColoredNeedle(frame, gauge);
+    if (angle >= 0) return angle;
+    return detectNeedleRadial(frame, gauge);
 }
 
 // Scan around the gauge perimeter to find tick marks and numbers
