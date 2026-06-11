@@ -106,7 +106,7 @@ int main(int argc, char **argv) {
     std::vector<my_circle> my_circles;
 
     // Read the image
-    std::string imageName("resources/circles.png");  // by default
+    std::string imageName("../resources/circles.png");  // by default
     if (argc > 1) {
         imageName = argv[1];
     }
