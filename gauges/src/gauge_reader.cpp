@@ -56,25 +56,110 @@ static void onMouseClick(int event, int x, int y, int flags, void *userdata) {
     }
 }
 
-// Detect the gauge circle(s) in the frame using HoughCircles
-std::vector<GaugeROI> detectGaugeCircles(const cv::Mat &frame) {
-    cv::Mat gray, blurred;
-    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-    cv::GaussianBlur(gray, blurred, cv::Size(9, 9), 2, 2);
+static cv::Point gCircleCenter;
+static int gCircleRadius = 0;
+static int gCircleStage = 0; // 0=not started, 1=click center, 2=click edge, 3=done
 
-    std::vector<cv::Vec3f> circles;
-    cv::HoughCircles(blurred, circles, cv::HOUGH_GRADIENT, 1,
-                     blurred.rows / 8,    // min distance between centers
-                     100,                 // canny threshold
-                     50,                  // accumulator threshold
-                     std::max(blurred.rows, blurred.cols) / 10,  // min radius
-                     std::max(blurred.rows, blurred.cols) / 2);  // max radius
-
-    std::vector<GaugeROI> gauges;
-    for (const auto &c : circles) {
-        gauges.push_back({cv::Point(cvRound(c[0]), cvRound(c[1])), cvRound(c[2])});
+static void onCircleClick(int event, int x, int y, int flags, void *userdata) {
+    if (event == cv::EVENT_LBUTTONDOWN) {
+        if (gCircleStage == 1) {
+            gCircleCenter = cv::Point(x, y);
+            std::cout << "  >> Center set at (" << x << ", " << y << "). Now click on the edge.\n";
+            gCircleStage = 2;
+        } else if (gCircleStage == 2) {
+            gCircleRadius = cvRound(cv::norm(cv::Point(x, y) - gCircleCenter));
+            std::cout << "  >> Radius set to " << gCircleRadius << ".\n";
+            gCircleStage = 3;
+        }
     }
-    return gauges;
+}
+
+// Detect the gauge circle using multiple HoughCircles parameter sets,
+// with a manual click fallback.
+std::vector<GaugeROI> detectGaugeCircles(const cv::Mat &frame) {
+    cv::Mat gray;
+    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+
+    int maxDim = std::max(gray.rows, gray.cols);
+    int minR = maxDim / 15;
+    int maxR = maxDim / 2;
+
+    // Try multiple parameter combinations
+    struct Params { double dp; int canny; int acc; };
+    std::vector<Params> paramSets = {
+        {1,   80,  40},
+        {1,   100, 50},
+        {1,   60,  30},
+        {1.2, 80,  40},
+        {1.2, 100, 50},
+        {1.5, 80,  30},
+        {2,   100, 40},
+    };
+
+    for (const auto &p : paramSets) {
+        cv::Mat blurred;
+        cv::GaussianBlur(gray, blurred, cv::Size(9, 9), 2, 2);
+
+        std::vector<cv::Vec3f> circles;
+        cv::HoughCircles(blurred, circles, cv::HOUGH_GRADIENT, p.dp,
+                         gray.rows / 6, p.canny, p.acc, minR, maxR);
+        if (!circles.empty()) {
+            std::vector<GaugeROI> gauges;
+            for (const auto &c : circles) {
+                gauges.push_back({cv::Point(cvRound(c[0]), cvRound(c[1])), cvRound(c[2])});
+            }
+            return gauges;
+        }
+    }
+
+    // Try without blur
+    for (const auto &p : paramSets) {
+        std::vector<cv::Vec3f> circles;
+        cv::HoughCircles(gray, circles, cv::HOUGH_GRADIENT, p.dp,
+                         gray.rows / 6, p.canny, p.acc, minR, maxR);
+        if (!circles.empty()) {
+            std::vector<GaugeROI> gauges;
+            for (const auto &c : circles) {
+                gauges.push_back({cv::Point(cvRound(c[0]), cvRound(c[1])), cvRound(c[2])});
+            }
+            return gauges;
+        }
+    }
+
+    // All auto-detection failed — manual fallback
+    std::cout << "  >> Auto circle detection failed.\n";
+    std::cout << "  >> Click on the center of the gauge, then click on the edge.\n";
+
+    gCircleStage = 1;
+    cv::namedWindow("Manual Circle");
+    cv::setMouseCallback("Manual Circle", onCircleClick, nullptr);
+
+    while (gCircleStage < 3) {
+        cv::Mat disp = frame.clone();
+        if (gCircleStage == 1) {
+            cv::putText(disp, "Click on the CENTER of the gauge",
+                        cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.8,
+                        cv::Scalar(0, 255, 255), 2);
+        } else if (gCircleStage == 2) {
+            cv::circle(disp, gCircleCenter, 5, cv::Scalar(0, 255, 0), -1);
+            cv::circle(disp, gCircleCenter, 30, cv::Scalar(0, 255, 0), 1);
+            cv::putText(disp, "Now click on the EDGE of the gauge face",
+                        cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.8,
+                        cv::Scalar(0, 255, 255), 2);
+        }
+        cv::imshow("Manual Circle", disp);
+        if (cv::waitKey(30) == 27) break;
+    }
+
+    cv::destroyWindow("Manual Circle");
+
+    if (gCircleStage == 3 && gCircleRadius > 0) {
+        std::vector<GaugeROI> gauges;
+        gauges.push_back({gCircleCenter, gCircleRadius});
+        return gauges;
+    }
+
+    return {};
 }
 
 // Create a circular mask for the gauge
@@ -233,58 +318,50 @@ double detectNeedleAngle(const cv::Mat &frame, const GaugeROI &gauge) {
     return detectNeedleRadial(frame, gauge);
 }
 
-// Scan around the gauge perimeter to find tick marks and numbers
-std::vector<TickMark> scanRingMarkings(const cv::Mat &frame, const GaugeROI &gauge) {
+// Scan a thin ring at a user-specified radius to find all marking angles
+std::vector<TickMark> scanRingAtRadius(const cv::Mat &frame, const GaugeROI &gauge,
+                                        double scanRadius, int numAngles = 720) {
     cv::Mat gray;
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
-    int numAngles = 40;  // 0.5 degree resolution
-    double ringInner = gauge.radius * 0.70;
-    double ringOuter = gauge.radius * 0.90;
-    int ringWidth = cvRound(ringOuter - ringInner);
-
-    std::vector<double> radialIntensity(numAngles, 0);
+    std::vector<double> intensity(numAngles, 0);
 
     for (int i = 0; i < numAngles; i++) {
         double angle = 2.0 * PI * i / numAngles;
         double sum = 0;
         int count = 0;
-
-        for (int r = 0; r < ringWidth; r++) {
-            double rad = ringInner + r;
-            int x = cvRound(gauge.center.x + rad * std::cos(angle));
-            int y = cvRound(gauge.center.y + rad * std::sin(angle));
+        for (int dr = -2; dr <= 2; dr++) {
+            double r = scanRadius + dr;
+            int x = cvRound(gauge.center.x + r * std::cos(angle));
+            int y = cvRound(gauge.center.y + r * std::sin(angle));
             if (x >= 0 && x < gray.cols && y >= 0 && y < gray.rows) {
                 sum += gray.at<uchar>(y, x);
                 count++;
             }
         }
-        radialIntensity[i] = (count > 0) ? (sum / count) : 255;
+        intensity[i] = (count > 0) ? (sum / count) : 255;
     }
 
-    // Smooth the signal
+    int window = 5;
     std::vector<double> smoothed(numAngles, 0);
-    int window = 3;
     for (int i = 0; i < numAngles; i++) {
         double s = 0;
         for (int w = -window; w <= window; w++) {
             int idx = (i + w + numAngles) % numAngles;
-            s += radialIntensity[idx];
+            s += intensity[idx];
         }
-        smoothed[i] = s / (2 * window + 1);
+        smoothed[i] = s / (2.0 * window + 1);
     }
 
-    // Find valleys (dark markings) by thresholding the smoothed signal
     double globalMin = *std::min_element(smoothed.begin(), smoothed.end());
     double globalMax = *std::max_element(smoothed.begin(), smoothed.end());
-    double threshold = globalMin + (globalMax - globalMin) * 0.35;
+    double threshold = globalMin + (globalMax - globalMin) * 0.4;
 
     std::vector<bool> isMarking(numAngles, false);
     for (int i = 0; i < numAngles; i++) {
         isMarking[i] = (smoothed[i] < threshold);
     }
 
-    // Cluster consecutive marking angles
     std::vector<TickMark> marks;
     int start = -1;
     for (int i = 0; i <= numAngles; i++) {
@@ -293,18 +370,15 @@ std::vector<TickMark> scanRingMarkings(const cv::Mat &frame, const GaugeROI &gau
             start = i;
         } else if (!isMark && start != -1) {
             int end = i - 1;
-            if (end - start >= 2) {  // minimum width of 2 angle steps
+            if (end - start >= 3) {
                 double centerAngle = 2.0 * PI * (start + end) / (2.0 * numAngles);
                 double width = 2.0 * PI * (end - start + 1) / numAngles;
                 double prominence = 0;
-
-                // compute depth of the valley
                 for (int j = start; j <= end; j++) {
                     prominence += (255.0 - smoothed[j]);
                 }
                 prominence /= (end - start + 1);
-
-                marks.push_back({centerAngle, width, prominence, ringInner});
+                marks.push_back({centerAngle, width, prominence, scanRadius});
             }
             start = -1;
         }
@@ -313,52 +387,152 @@ std::vector<TickMark> scanRingMarkings(const cv::Mat &frame, const GaugeROI &gau
     return marks;
 }
 
-// Auto-detect scale calibration by finding the number "0" and "4" positions
-ScaleCalibration autoCalibrateScale(const std::vector<TickMark> &marks,
-                                     const GaugeROI &gauge,
-                                     int numNumbers = 5) {
-    ScaleCalibration calib = {0, 0, 0, 4, false};
+// Cluster markings into groups by angular proximity.
+// Returns a vector of aggregated marks (one per cluster).
+std::vector<TickMark> clusterMarkings(const std::vector<TickMark> &marks) {
+    if (marks.empty()) return {};
 
-    if (marks.size() < 3) return calib;
+    std::vector<TickMark> sorted = marks;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const TickMark &a, const TickMark &b) { return a.angle < b.angle; });
 
-    // Sort marks by prominence (descending)
-    std::vector<TickMark> sortedByProminence = marks;
-    std::sort(sortedByProminence.begin(), sortedByProminence.end(),
-              [](const TickMark &a, const TickMark &b) {
-                  return a.prominence > b.prominence;
-              });
+    // Compute median angular gap to determine clustering threshold
+    std::vector<double> gaps;
+    for (size_t i = 1; i < sorted.size(); i++) {
+        gaps.push_back(sorted[i].angle - sorted[i - 1].angle);
+    }
+    // Handle wrap-around
+    gaps.push_back((2.0 * PI - sorted.back().angle) + sorted.front().angle);
 
-    // Take the top markings as likely number positions
-    int takeCount = std::min(static_cast<int>(sortedByProminence.size()), numNumbers + 2);
-    std::vector<TickMark> topMarks(sortedByProminence.begin(),
-                                    sortedByProminence.begin() + takeCount);
+    std::sort(gaps.begin(), gaps.end());
+    double medianGap = gaps[gaps.size() / 2];
 
-    // Sort by angle
-    std::sort(topMarks.begin(), topMarks.end(),
-              [](const TickMark &a, const TickMark &b) {
-                  return a.angle < b.angle;
-              });
+    // Gap threshold: 3x the median gap separates major groups (numbers)
+    double gapThreshold = medianGap * 3.0;
 
-    if (topMarks.size() < numNumbers) return calib;
+    std::vector<TickMark> clusters;
+    double sumAngle = sorted[0].angle * sorted[0].prominence;
+    double sumProminence = sorted[0].prominence;
+    int clusterCount = 1;
 
-    // For a 0-4 gauge, we expect 5 numbers (0,1,2,3,4) evenly distributed.
-    // Take the first N major marks as the number positions.
-    std::vector<double> numberAngles;
-    for (size_t i = 0; i < numNumbers && i < topMarks.size(); i++) {
-        numberAngles.push_back(topMarks[i].angle);
+    for (size_t i = 1; i < sorted.size(); i++) {
+        double gap = sorted[i].angle - sorted[i - 1].angle;
+        if (gap > gapThreshold) {
+            double avgAngle = sumAngle / sumProminence;
+            clusters.push_back({avgAngle, 0, sumProminence / clusterCount, sorted[i - 1].distance});
+            sumAngle = sorted[i].angle * sorted[i].prominence;
+            sumProminence = sorted[i].prominence;
+            clusterCount = 1;
+        } else {
+            sumAngle += sorted[i].angle * sorted[i].prominence;
+            sumProminence += sorted[i].prominence;
+            clusterCount++;
+        }
     }
 
-    if (numberAngles.size() < 2) return calib;
+    double avgAngle = sumAngle / sumProminence;
+    clusters.push_back({avgAngle, 0, sumProminence / clusterCount, sorted.back().distance});
 
-    // Normalize: sort by angle and handle wrap-around
-    std::sort(numberAngles.begin(), numberAngles.end());
+    return clusters;
+}
 
-    // The first number (0) should be at the start, last number (4) at the end.
-    // For the gauge, "0" is the first marking and "4" is the last.
-    if (numberAngles.size() < numNumbers) return calib;
+// Refine detected markings using the even-spacing constraint.
+// Removes outliers and fills in undetected markings.
+std::vector<TickMark> refineEvenSpacing(const std::vector<TickMark> &marks) {
+    if (marks.size() < 3) return marks;
 
-    calib.startAngle = numberAngles[0];  // number "0"
-    calib.endAngle = numberAngles[numNumbers - 1];  // number "4"
+    std::vector<double> angles;
+    for (const auto &m : marks) angles.push_back(m.angle);
+    std::sort(angles.begin(), angles.end());
+
+    // Compute angular gaps between consecutive markings
+    std::vector<double> gaps;
+    for (size_t i = 1; i < angles.size(); i++) gaps.push_back(angles[i] - angles[i - 1]);
+    gaps.push_back((2.0 * PI - angles.back()) + angles.front());
+
+    // Filter out tiny gaps (noise / duplicate detections)
+    double minGap = 1.0 * PI / 180.0;
+    gaps.erase(std::remove_if(gaps.begin(), gaps.end(),
+                [&](double g) { return g < minGap; }), gaps.end());
+
+    if (gaps.empty()) return marks;
+
+    // Base spacing = median of the remaining gaps
+    std::sort(gaps.begin(), gaps.end());
+    double baseSpacing = gaps[gaps.size() / 2];
+    int totalMarks = cvRound(2.0 * PI / baseSpacing);
+    if (totalMarks < 3) return marks;
+    baseSpacing = 2.0 * PI / totalMarks;
+
+    // Find the best offset by testing each detected marking
+    auto angularDist = [](double a, double b) {
+        double d = std::abs(a - b);
+        return std::min(d, 2.0 * PI - d);
+    };
+
+    int bestCount = 0;
+    double bestOffset = angles[0];
+    for (auto off : angles) {
+        int count = 0;
+        for (auto a : angles) {
+            double d = angularDist(a, off);
+            double residue = std::fmod(d, baseSpacing);
+            if (residue < baseSpacing * 0.25 || residue > baseSpacing * 0.75)
+                count++;
+        }
+        if (count > bestCount) {
+            bestCount = count;
+            bestOffset = off;
+        }
+    }
+
+    // Generate the full grid of evenly-spaced marking angles
+    double avgProminence = 0;
+    for (const auto &m : marks) avgProminence += m.prominence;
+    avgProminence /= marks.size();
+
+    std::vector<TickMark> refined;
+    for (int i = 0; i < totalMarks; i++) {
+        double pos = bestOffset + i * baseSpacing;
+        pos = std::fmod(pos, 2.0 * PI);
+        if (pos < 0) pos += 2.0 * PI;
+
+        // Find the closest detected marking within tolerance
+        bool matched = false;
+        for (const auto &m : marks) {
+            if (angularDist(m.angle, pos) < baseSpacing * 0.3) {
+                refined.push_back(m);
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) {
+            // Fill in the missing marking with average prominence
+            refined.push_back({pos, 0, avgProminence, marks.front().distance});
+        }
+    }
+
+    std::sort(refined.begin(), refined.end(),
+              [](const TickMark &a, const TickMark &b) { return a.angle < b.angle; });
+    return refined;
+}
+
+// Given markings from a ring scan, identify the scale endpoints (0 and 4).
+// Returns the angles of the first and last major marking clusters.
+ScaleCalibration calibrateFromMarkings(const std::vector<TickMark> &marks) {
+    ScaleCalibration calib = {0, 0, 0, 4, false};
+    if (marks.size() < 4) return calib;
+
+    std::vector<TickMark> clusters = clusterMarkings(marks);
+    if (clusters.size() < 2) return calib;
+
+    // Sort clusters by angle
+    std::sort(clusters.begin(), clusters.end(),
+              [](const TickMark &a, const TickMark &b) { return a.angle < b.angle; });
+
+    // The first and last clusters are the scale endpoints (0 and 4)
+    calib.startAngle = clusters.front().angle;
+    calib.endAngle = clusters.back().angle;
     calib.minValue = 0;
     calib.maxValue = 4;
     calib.valid = true;
@@ -455,15 +629,23 @@ void drawOverlay(cv::Mat &frame, const GaugeROI &gauge,
                 cv::FONT_HERSHEY_SIMPLEX, 1.2, cv::Scalar(0, 255, 255), 3);
 }
 
+static cv::Point gMarkClick;
+static bool gMarkClicked = false;
+
+static void onMarkClick(int event, int x, int y, int flags, void *userdata) {
+    if (event == cv::EVENT_LBUTTONDOWN && !gMarkClicked) {
+        gMarkClick = cv::Point(x, y);
+        gMarkClicked = true;
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <video_path> [--manual-calib]\n";
-        std::cerr << "  --manual-calib : Manually click on numbers 1 and 4\n";
+        std::cerr << "Usage: " << argv[0] << " <video_path>\n";
         return -1;
     }
 
     std::string videoPath = argv[1];
-    bool manualCalib = (argc >= 3 && std::string(argv[2]) == "--manual-calib");
 
     cv::VideoCapture cap(videoPath);
     if (!cap.isOpened()) {
@@ -486,7 +668,7 @@ int main(int argc, char **argv) {
     std::cout << "Detecting gauge circle...\n";
     std::vector<GaugeROI> gauges = detectGaugeCircles(frame);
     if (gauges.empty()) {
-        std::cerr << "Error: No gauge circle detected. Try adjusting HoughCircles parameters.\n";
+        std::cerr << "Error: No gauge circle detected.\n";
         return -1;
     }
 
@@ -494,53 +676,106 @@ int main(int argc, char **argv) {
     std::cout << "  >> Gauge found at center=(" << gauge.center.x << ", "
               << gauge.center.y << "), radius=" << gauge.radius << "\n";
 
-    // Draw detected circle for verification
-    cv::Mat display = frame.clone();
-    for (const auto &g : gauges) {
-        cv::circle(display, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
-    }
-    cv::imshow("Gauge Detection", display);
-    std::cout << "Press any key to continue...\n";
-    cv::waitKey(0);
-    cv::destroyWindow("Gauge Detection");
-
-    // Step 2: Calibrate the scale (find where numbers 1 and 4 are)
+    // Step 2: Calibrate — ask user to click on any one marking on the scale
     ScaleCalibration scale{0, 0, 0, 4, false};
 
-    if (manualCalib) {
-        std::cout << "\nManual calibration mode:\n";
-        std::cout << "  >> Click on the number '0', then click on the number '4'\n";
-        std::cout << "  >> Press 'c' when done.\n";
+    std::cout << "\nCalibration: click on ANY marking on the gauge scale.\n";
+    std::cout << "  (a tick mark, a number, anything on the printed scale)\n";
+
+    cv::namedWindow("Calibration");
+    cv::setMouseCallback("Calibration", onMarkClick, nullptr);
+
+    gMarkClicked = false;
+    cv::Mat calibFrame = frame.clone();
+    cv::circle(calibFrame, gauge.center, gauge.radius, cv::Scalar(0, 255, 0), 2);
+
+    while (!gMarkClicked) {
+        cv::Mat disp = calibFrame.clone();
+        cv::putText(disp, "Click on any marking on the gauge scale",
+                    cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                    cv::Scalar(0, 255, 255), 2);
+        cv::imshow("Calibration", disp);
+        int key = cv::waitKey(30);
+        if (key == 27 || key == 'q' || key == 'Q') {
+            cv::destroyWindow("Calibration");
+            return -1;
+        }
+    }
+
+    cv::circle(calibFrame, gMarkClick, 5, cv::Scalar(0, 0, 255), -1);
+    cv::imshow("Calibration", calibFrame);
+    cv::waitKey(500);
+
+    double scanRadius = cv::norm(gMarkClick - gauge.center);
+    scanRadius = std::clamp(scanRadius, gauge.radius * 0.3, gauge.radius * 0.95);
+    std::cout << "  >> Mark clicked at radius " << scanRadius
+              << " from center.\n";
+
+    // Step 3: Scan ring at that exact radius to find all markings
+    std::cout << "  >> Scanning ring at radius " << scanRadius << "...\n";
+    std::vector<TickMark> marks = scanRingAtRadius(frame, gauge, scanRadius, 720);
+    std::cout << "  >> Found " << marks.size() << " raw markings.\n";
+
+    // Refine using even-spacing constraint
+    std::vector<TickMark> refinedMarks = refineEvenSpacing(marks);
+    std::cout << "  >> Refined to " << refinedMarks.size() << " evenly-spaced markings.\n";
+
+    if (refinedMarks.size() >= 4) {
+        scale = calibrateFromMarkings(refinedMarks);
+    }
+
+    // Draw marking positions for visual feedback (raw vs refined)
+    cv::Mat markDisp = frame.clone();
+    for (const auto &m : marks) {
+        cv::Point pt(
+            cvRound(gauge.center.x + scanRadius * std::cos(m.angle)),
+            cvRound(gauge.center.y + scanRadius * std::sin(m.angle)));
+        cv::circle(markDisp, pt, 3, cv::Scalar(0, 0, 255), -1);  // red = raw
+    }
+    for (const auto &m : refinedMarks) {
+        cv::Point pt(
+            cvRound(gauge.center.x + scanRadius * std::cos(m.angle)),
+            cvRound(gauge.center.y + scanRadius * std::sin(m.angle)));
+        cv::circle(markDisp, pt, 5, cv::Scalar(0, 255, 0), -1);  // green = refined
+    }
+    cv::putText(markDisp, "Red=raw, Green=refined (evenly spaced). Press any key.",
+                cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                cv::Scalar(0, 255, 255), 2);
+    cv::imshow("Calibration", markDisp);
+    cv::waitKey(0);
+    cv::destroyWindow("Calibration");
+
+    if (!scale.valid) {
+        std::cout << "  >> Auto-detection of scale boundaries failed.\n";
+        std::cout << "  >> Falling back to manual: click on number 0, then 4.\n";
 
         gCalibStage = 1;
         gCalibPoints = {cv::Point(0, 0), cv::Point(0, 0), false};
 
-        cv::namedWindow("Calibration");
-        cv::setMouseCallback("Calibration", onMouseClick, nullptr);
+        cv::namedWindow("Manual Calibration");
+        cv::setMouseCallback("Manual Calibration", onMouseClick, nullptr);
 
-        cv::Mat calibFrame = frame.clone();
-        cv::circle(calibFrame, gauge.center, gauge.radius, cv::Scalar(0, 255, 0), 2);
+        cv::Mat manualFrame = frame.clone();
+        cv::circle(manualFrame, gauge.center, gauge.radius, cv::Scalar(0, 255, 0), 2);
 
         while (gCalibStage < 3) {
-            cv::Mat calibDisp = calibFrame.clone();
-
+            cv::Mat disp = manualFrame.clone();
             if (gCalibStage == 1) {
-                cv::putText(calibDisp, "Click on number '0'", cv::Point(30, 30),
+                cv::putText(disp, "Click on number '0'", cv::Point(30, 30),
                             cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
             } else if (gCalibStage == 2) {
-                cv::circle(calibDisp, gCalibPoints.pt0, 5, cv::Scalar(0, 255, 0), -1);
-                cv::putText(calibDisp, "0", gCalibPoints.pt0 + cv::Point(10, 0),
+                cv::circle(disp, gCalibPoints.pt0, 5, cv::Scalar(0, 255, 0), -1);
+                cv::putText(disp, "0", gCalibPoints.pt0 + cv::Point(10, 0),
                             cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
-                cv::putText(calibDisp, "Click on number '4'", cv::Point(30, 30),
+                cv::putText(disp, "Click on number '4'", cv::Point(30, 30),
                             cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
             }
-
-            cv::imshow("Calibration", calibDisp);
+            cv::imshow("Manual Calibration", disp);
             int key = cv::waitKey(30);
             if (key == 'c' || key == 'C') break;
         }
 
-        cv::destroyWindow("Calibration");
+        cv::destroyWindow("Manual Calibration");
 
         if (gCalibPoints.valid) {
             scale.startAngle = std::atan2(gCalibPoints.pt0.y - gauge.center.y,
@@ -550,41 +785,18 @@ int main(int argc, char **argv) {
             scale.minValue = 0;
             scale.maxValue = 4;
             scale.valid = true;
-            std::cout << "  >> Calibration complete: 0 at angle="
-                      << scale.startAngle << " rad, 4 at angle="
-                      << scale.endAngle << " rad\n";
-        } else {
-            std::cout << "  >> Manual calibration cancelled.\n";
         }
     }
 
-    if (!scale.valid) {
-        std::cout << "\nAuto-calibrating scale by scanning gauge markings...\n";
-        std::vector<TickMark> marks = scanRingMarkings(frame, gauge);
-        std::cout << "  >> Found " << marks.size() << " markings\n";
-
-        if (!marks.empty()) {
-            scale = autoCalibrateScale(marks, gauge, 5);
-            if (scale.valid) {
-                std::cout << "  >> Auto-calibration: 1 at angle="
-                          << scale.startAngle << " rad, 4 at angle="
-                          << scale.endAngle << " rad\n";
-            } else {
-                std::cout << "  >> Auto-calibration failed, falling back to manual input.\n";
-                std::cout << "  >> Defaulting to 135 degrees start, 45 degrees end...\n";
-                scale.startAngle = 135.0 * PI / 180.0;
-                scale.endAngle = 45.0 * PI / 180.0;
-                scale.valid = true;
-            }
-        } else {
-            std::cout << "  >> No markings found, using default angles.\n";
-            scale.startAngle = 135.0 * PI / 180.0;
-            scale.endAngle = 45.0 * PI / 180.0;
-            scale.valid = true;
-        }
+    if (scale.valid) {
+        std::cout << "  >> Scale calibrated: 0 at " << (scale.startAngle * 180.0 / PI)
+                  << " deg, 4 at " << (scale.endAngle * 180.0 / PI) << " deg\n";
+    } else {
+        std::cerr << "Calibration failed.\n";
+        return -1;
     }
 
-    // Step 3: Process video
+    // Step 4: Process video
     std::cout << "\nProcessing video...\n";
 
     cv::VideoWriter writer;
