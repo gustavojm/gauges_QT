@@ -50,9 +50,7 @@ static void onCircleClick(int event, int x, int y, int flags, void *userdata) {
     }
 }
 
-// Detect the gauge circle using multiple HoughCircles parameter sets,
-// with a manual click fallback.
-std::vector<GaugeROI> detectGaugeCircles(const cv::Mat &frame) {
+std::vector<GaugeROI> detectGaugeCircles(const cv::Mat &frame, const std::string &winName) {
     cv::Mat gray;
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
@@ -60,7 +58,6 @@ std::vector<GaugeROI> detectGaugeCircles(const cv::Mat &frame) {
     int minR = maxDim / 15;
     int maxR = maxDim / 2;
 
-    // Try multiple parameter combinations
     struct Params { double dp; int canny; int acc; };
     std::vector<Params> paramSets = {
         {1,   80,  40},
@@ -88,7 +85,6 @@ std::vector<GaugeROI> detectGaugeCircles(const cv::Mat &frame) {
         }
     }
 
-    // Try without blur
     for (const auto &p : paramSets) {
         std::vector<cv::Vec3f> circles;
         cv::HoughCircles(gray, circles, cv::HOUGH_GRADIENT, p.dp,
@@ -102,13 +98,10 @@ std::vector<GaugeROI> detectGaugeCircles(const cv::Mat &frame) {
         }
     }
 
-    // All auto-detection failed — manual fallback
-    std::cout << "  >> Auto circle detection failed.\n";
-    std::cout << "  >> Click on the center of the gauge, then click on the edge.\n";
+    std::cout << "  >> Auto circle detection failed. Click center then edge.\n";
 
     gCircleStage = 1;
-    cv::namedWindow("Manual Circle");
-    cv::setMouseCallback("Manual Circle", onCircleClick, nullptr);
+    cv::setMouseCallback(winName, onCircleClick, nullptr);
 
     while (gCircleStage < 3) {
         cv::Mat disp = frame.clone();
@@ -123,11 +116,11 @@ std::vector<GaugeROI> detectGaugeCircles(const cv::Mat &frame) {
                         cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.8,
                         cv::Scalar(0, 255, 255), 2);
         }
-        cv::imshow("Manual Circle", disp);
+        cv::imshow(winName, disp);
         if (cv::waitKey(30) == 27) break;
     }
 
-    cv::destroyWindow("Manual Circle");
+    cv::setMouseCallback(winName, nullptr, nullptr);
 
     if (gCircleStage == 3 && gCircleRadius > 0) {
         std::vector<GaugeROI> gauges;
@@ -573,9 +566,15 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    // Step 1: Detect the gauge circle
+    const std::string winName = "Gauge Reader";
+
+    cv::namedWindow(winName, cv::WINDOW_NORMAL);
+    cv::resizeWindow(winName, frame.cols, frame.rows + 80);
+    cv::createTrackbar("Min value", winName, &gCalibTrackMin, 400);
+    cv::createTrackbar("Max value", winName, &gCalibTrackMax, 400);
+
     std::cout << "Detecting gauge circle...\n";
-    std::vector<GaugeROI> gauges = detectGaugeCircles(frame);
+    std::vector<GaugeROI> gauges = detectGaugeCircles(frame, winName);
     if (gauges.empty()) {
         std::cerr << "Error: No gauge circle detected.\n";
         return -1;
@@ -590,18 +589,14 @@ int main(int argc, char **argv) {
     cv::Mat calibFrame = frame.clone();
     cv::circle(calibFrame, gauge.center, gauge.radius, cv::Scalar(0, 255, 0), 2);
 
-    cv::namedWindow("Calibration", cv::WINDOW_NORMAL);
-    cv::resizeWindow("Calibration", calibFrame.cols, calibFrame.rows + 80);
-    cv::createTrackbar("Min value", "Calibration", &gCalibTrackMin, 1000);
-    cv::createTrackbar("Max value", "Calibration", &gCalibTrackMax, 1000);
-    cv::setMouseCallback("Calibration", onCalibClick, nullptr);
+    cv::setMouseCallback(winName, onCalibClick, nullptr);
 
     gCalibPhase = 0;
     gCalibClickDone = false;
     gCalibTrackMin = 0;
     gCalibTrackMax = 400;
-    cv::setTrackbarPos("Min value", "Calibration", gCalibTrackMin);
-    cv::setTrackbarPos("Max value", "Calibration", gCalibTrackMax);
+    cv::setTrackbarPos("Min value", winName, gCalibTrackMin);
+    cv::setTrackbarPos("Max value", winName, gCalibTrackMax);
     bool confirmed = false;
 
     while (!confirmed) {
@@ -621,8 +616,8 @@ int main(int argc, char **argv) {
             cv::circle(disp, gPtMax, 10, cv::Scalar(0, 0, 255), 2);
             std::ostringstream oss;
             oss << "Min=" << std::fixed << std::setprecision(2)
-                << (gCalibTrackMin)
-                << "  Max=" << (gCalibTrackMax);
+                << (gCalibTrackMin / 100.0)
+                << "  Max=" << (gCalibTrackMax / 100.0);
             cv::putText(disp, oss.str(), cv::Point(30, 30),
                         cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
             cv::putText(disp, "Adjust sliders, then press ENTER to confirm",
@@ -630,7 +625,7 @@ int main(int argc, char **argv) {
                         cv::Scalar(200, 200, 200), 1);
         }
 
-        cv::imshow("Calibration", disp);
+        cv::imshow(winName, disp);
 
         if (gCalibClickDone) {
             if (gCalibPhase == 0) {
@@ -650,12 +645,12 @@ int main(int argc, char **argv) {
         if (key == 27) break;
     }
 
-    cv::destroyWindow("Calibration");
+    cv::setMouseCallback(winName, nullptr, nullptr);
 
     scale.startAngle = std::atan2(gPtMin.y - gauge.center.y, gPtMin.x - gauge.center.x);
     scale.endAngle = std::atan2(gPtMax.y - gauge.center.y, gPtMax.x - gauge.center.x);
-    scale.minValue = gCalibTrackMin;
-    scale.maxValue = gCalibTrackMax;
+    scale.minValue = gCalibTrackMin / 100.0;
+    scale.maxValue = gCalibTrackMax / 100.0;
     scale.valid = confirmed;
 
     if (confirmed) {
