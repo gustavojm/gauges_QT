@@ -19,7 +19,7 @@ if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
   message(FATAL_ERROR "In-source builds not allowed. Please make a new directory (called a build directory) and run CMake from there.\n")
 endif()
 
-add_executable(${PROJECT_NAME} src/gauge_reader.cpp src/detection.cpp)
+add_executable(${PROJECT_NAME} src/gauge_reader.cpp src/gauge_detector.cpp)
 
 list(APPEND CMAKE_PREFIX_PATH "/home/gustavo/vcpkg/installed/x64-linux")
 

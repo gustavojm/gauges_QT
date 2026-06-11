@@ -1,0 +1,94 @@
+# Gauge Reader — Knowledge File
+
+## Pipeline Overview
+1. **Circle detection** — locate the gauge face in the frame (auto HoughCircles, fallback to manual 2-click)
+2. **Interactive calibration** — user clicks min/max scale markings, adjusts slider values in ImGui
+3. **Video processing loop** — detect needle angle per frame, map to value, overlay + write
+
+---
+
+## 1. Circle Detection (`GaugeDetector::detectCircle`)
+- `GaugeDetector` class owns `GaugeROI` (center + radius) and `ScaleCalibration` internally
+- Tries 7 HoughCircles parameter sets (dp, canny, acc) *with* Gaussian blur (9×9, σ=2)
+- If all fail, retries the same 7 sets *without* blur
+- If still no detection → manual fallback via `setCircle()`: two-click UI (center then edge) in ImGui
+- Radius bounds: `[maxDim/15, maxDim/2]`
+
+## 2. Interactive Calibration
+- Single ImGui/GLFW window "Gauge Reader" — video displayed as OpenGL texture via `ImGui::Image`
+- **Phase 0**: user clicks minimum-value marking on the image
+- **Phase 1**: user clicks maximum-value marking on the image
+- **Phase 2**: two ImGui sliders (0–1000 range); press Confirm button
+- `tryGetClickOnImage()` maps mouse coords from ImGui display rect back to pixel coords
+- Angles from clicks → `calibrateFromPoints()` computes `startAngle`/`endAngle` (via `atan2`)
+- Slider values → `setCalibrationValues()` sets `minValue`/`maxValue`
+
+## 3. Needle Detection (`GaugeDetector::detectNeedle`)
+Two methods, tried in order:
+
+### a) Colored needle (`detectColoredNeedle`)
+- HSV segmentation for red (two hue ranges: 0–10 and 160–179)
+- Morphological close + open to clean mask
+- Find external contours, filter by area (> radius/2) and centroid distance (< 0.6×radius)
+- Score contours by `maxTipDistance × log(area)`
+- Return angle from center to farthest contour point
+
+### b) Radial scan fallback (`detectNeedleRadial`)
+- Adaptive threshold (Gaussian, block=25, C=8) on masked grayscale
+- 360 radial lines from 8% radius to edge
+- Per angle: scan outward, track longest contiguous dark run + total dark density
+- Score = `density × 0.4 + longestRun/radius × 0.6`
+- Needle has long continuous dark run; tick marks produce only short peripheral dark segments
+
+## 4. Angle-to-Value Mapping (`GaugeDetector::angleToValue`)
+- Normalise all angles to `[0, 2π)`
+- Handle wrap-around scale (e.g. start at 135°, end at 45°)
+- Linear interpolation: `value = min + (needlePos / range) × (max - min)`
+- Clamp to `[0, 1]` before scaling
+
+## 5. Output Smoothing
+- 5-frame deque of recent values
+- Arithmetic mean for display
+
+## 6. Overlay (`GaugeDetector::drawOverlay`)
+- Green circle around gauge face
+- Green line + value label at start angle ("min")
+- Red line + value label at end angle ("max")
+- Blue needle line from center to 80% radius
+- Yellow "Value: X.XX" text at top-left
+
+## 7. Video Output
+- Codec: MJPG → `*_output.avi`
+- 29.97 fps input, same rate for output
+
+---
+
+## Build
+```
+cmake -S /home/gustavo/cpp/OpenCV_Examples/gauges \
+      -B /home/gustavo/cpp/OpenCV_Examples/gauges/build
+cmake --build /home/gustavo/cpp/OpenCV_Examples/gauges/build
+```
+
+Run: `./build/gauges ./gauge.mov`
+
+## Dependencies
+- OpenCV 4.10.0
+- Dear ImGui (via vcpkg, `imgui[glfw-binding,opengl3-binding]`)
+- GLFW3
+- OpenGL
+- C++17
+
+## Key Architecture
+- Single GLFW window, Dear ImGui for all UI (no OpenCV highgui)
+- VideoTexture struct: uploads `cv::Mat` frames as OpenGL textures via `glTexImage2D`
+- `tryGetClickOnImage()`: converts ImGui `Image` click position back to pixel coords
+- Calibration uses ImGui sliders (0–1000 range, raw), not OpenCV trackbars
+- `GaugeDetector` class encapsulates all detection logic; owns `GaugeROI` and `ScaleCalibration` internally
+- GUI works with `detector.gauge()` / `detector.scale()` const accessors; calibration set via methods
+
+## Files
+- `src/detection.h` — `GaugeDetector` class + structs (GaugeROI, ScaleCalibration, TickMark) (~50 lines)
+- `src/detection.cpp` — all detection/processing logic as class methods (~350 lines)
+- `src/gauge_reader.cpp` — GLFW/ImGui GUI + main() + state machine (~400 lines)
+- `CMakeLists.txt` — build config (OpenCV + imgui + glfw3 + OpenGL)

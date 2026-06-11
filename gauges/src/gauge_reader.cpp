@@ -1,4 +1,4 @@
-#include "detection.h"
+#include "gauge_detector.h"
 
 #include <opencv2/opencv.hpp>
 #include <GLFW/glfw3.h>
@@ -138,8 +138,7 @@ int main(int argc, char **argv) {
     // ── App State ──────────────────────────────────────────────────
 
     AppState state = STATE_INIT;
-    GaugeROI gauge{};
-    ScaleCalibration scale{0, 0, 0, 1000, false};
+    GaugeDetector detector;
     VideoTexture videoTex;
     cv::Mat calibFrame;
 
@@ -163,13 +162,12 @@ int main(int argc, char **argv) {
         // ── State machine work (runs once per state entry) ───────────
         if (state == STATE_INIT && gCircleStage == 0) {
             std::cout << "Detecting gauge circle...\n";
-            std::vector<GaugeROI> gauges = detectGaugeCirclesAuto(frame);
-            if (!gauges.empty()) {
-                gauge = gauges[0];
-                std::cout << "  >> Gauge at (" << gauge.center.x << ", "
-                          << gauge.center.y << "), radius=" << gauge.radius << "\n";
+            if (detector.detectCircle(frame)) {
+                const auto &g = detector.gauge();
+                std::cout << "  >> Gauge at (" << g.center.x << ", "
+                          << g.center.y << "), radius=" << g.radius << "\n";
                 calibFrame = frame.clone();
-                cv::circle(calibFrame, gauge.center, gauge.radius, cv::Scalar(0, 255, 0), 2);
+                cv::circle(calibFrame, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
                 state = STATE_CALIB_MIN;
             } else {
                 gCircleStage = 1;
@@ -181,18 +179,19 @@ int main(int argc, char **argv) {
 
         // ── Calibrate from manual circle clicks ──────────────────────
         if (state == STATE_CIRCLE_MANUAL && gCircleStage == 3 && gCircleRadius > 0) {
-            gauge = GaugeROI{gCircleCenter, gCircleRadius};
-            std::cout << "  >> Gauge at (" << gauge.center.x << ", "
-                      << gauge.center.y << "), radius=" << gauge.radius << "\n";
+            detector.setCircle(gCircleCenter, gCircleRadius);
+            const auto &g = detector.gauge();
+            std::cout << "  >> Gauge at (" << g.center.x << ", "
+                      << g.center.y << "), radius=" << g.radius << "\n";
             calibFrame = frame.clone();
-            cv::circle(calibFrame, gauge.center, gauge.radius, cv::Scalar(0, 255, 0), 2);
+            cv::circle(calibFrame, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
             state = STATE_CALIB_MIN;
         }
 
         // ── Processing work ──────────────────────────────────────────
         if (state == STATE_PROCESSING) {
-            double needleAngle = detectNeedleAngle(frame, gauge);
-            double value = angleToValue(needleAngle, scale, gauge);
+            double needleAngle = detector.detectNeedle(frame);
+            double value = detector.angleToValue(needleAngle);
 
             if (value >= 0) {
                 valueHistory.push_back(value);
@@ -206,7 +205,7 @@ int main(int argc, char **argv) {
                                   / valueHistory.size();
             }
 
-            drawOverlay(frame, gauge, needleAngle, lastSmoothValue, scale);
+            detector.drawOverlay(frame, needleAngle, lastSmoothValue);
 
             if (writer.isOpened())
                 writer.write(frame);
@@ -314,22 +313,26 @@ int main(int argc, char **argv) {
             ImGui::SliderInt("Max value", &gCalibTrackMax, 0, 1000);
             ImGui::Text("Min = %d   Max = %d", gCalibTrackMin, gCalibTrackMax);
             ImGui::Spacing();
-            
-            ImGui::InputFloat("Min angle", (float*)&scale.startAngle, 0.01f, 0.1f, "%.3f rad");
-            ImGui::InputFloat("Max angle", (float*)&scale.endAngle, 0.01f, 0.1f, "%.3f rad");
+
+            {
+                float sa = detector.scale().startAngle;
+                float ea = detector.scale().endAngle;
+                if (ImGui::InputFloat("Min angle", &sa, 0.01f, 0.1f, "%.3f rad"))
+                    detector.setStartAngle(sa);
+                if (ImGui::InputFloat("Max angle", &ea, 0.01f, 0.1f, "%.3f rad"))
+                    detector.setEndAngle(ea);
+            }
 
             if (ImGui::Button("Confirm", ImVec2(120, 0))) {
-                scale.startAngle = std::atan2(gPtMin.y - gauge.center.y,
-                                              gPtMin.x - gauge.center.x);
-                scale.endAngle = std::atan2(gPtMax.y - gauge.center.y,
-                                            gPtMax.x - gauge.center.x);
-                scale.minValue = gCalibTrackMin;
-                scale.maxValue = gCalibTrackMax;
-                scale.valid = true;
-                std::cout << "  >> Scale: " << scale.minValue << " at "
-                          << (scale.startAngle * 180.0 / PI) << " deg, "
-                          << scale.maxValue << " at "
-                          << (scale.endAngle * 180.0 / PI) << " deg\n";
+                detector.calibrateFromPoints(gPtMin, gPtMax);
+                detector.setCalibrationValues(gCalibTrackMin, gCalibTrackMax);
+                detector.setCalibrationValid(true);
+
+                const auto &s = detector.scale();
+                std::cout << "  >> Scale: " << s.minValue << " at "
+                          << (s.startAngle * 180.0 / PI) << " deg, "
+                          << s.maxValue << " at "
+                          << (s.endAngle * 180.0 / PI) << " deg\n";
 
                 std::string outputPath = videoPath.substr(0, videoPath.find_last_of('.')) + "_output.avi";
                 int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
