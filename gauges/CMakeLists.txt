@@ -19,17 +19,24 @@ if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
   message(FATAL_ERROR "In-source builds not allowed. Please make a new directory (called a build directory) and run CMake from there.\n")
 endif()
 
-add_executable(${PROJECT_NAME} src/gauge_reader.cpp)
+add_executable(${PROJECT_NAME} src/gauge_reader.cpp src/detection.cpp)
+
+list(APPEND CMAKE_PREFIX_PATH "/home/gustavo/vcpkg/installed/x64-linux")
 
 find_package(OpenCV REQUIRED)
+find_package(imgui CONFIG REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
+find_package(OpenGL REQUIRED)
 
 message(STATUS "----------------------- ${OpenCV_INCLUDE_DIRS} ------------------------")
 
 target_include_directories(${PROJECT_NAME} PRIVATE
                               ${OpenCV_INCLUDE_DIRS}
-                              ${HEADERS_DIR}
                            )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
                         ${OpenCV_LIBS}
+                        imgui::imgui
+                        glfw
+                        OpenGL::GL
                      )
