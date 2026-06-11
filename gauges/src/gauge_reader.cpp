@@ -363,10 +363,7 @@ std::vector<TickMark> scanRingAtRadius(const cv::Mat &frame, const GaugeROI &gau
     return marks;
 }
 
-// Refine detected markings using the even-spacing constraint.
-// Removes outliers and fills in undetected markings.
-// maxMarks caps the total number of grid positions generated.
-std::vector<TickMark> refineEvenSpacing(const std::vector<TickMark> &marks, int maxMarks = 40) {
+std::vector<TickMark> refineEvenSpacing(const std::vector<TickMark> &marks) {
     if (marks.size() < 3) return marks;
 
     std::vector<double> angles;
@@ -390,7 +387,6 @@ std::vector<TickMark> refineEvenSpacing(const std::vector<TickMark> &marks, int 
     double baseSpacing = gaps[gaps.size() / 2];
     int totalMarks = cvRound(2.0 * PI / baseSpacing);
     if (totalMarks < 3) return marks;
-    totalMarks = std::min(totalMarks, maxMarks);
     baseSpacing = 2.0 * PI / totalMarks;
 
     // Find the best offset by testing each detected marking
@@ -536,25 +532,21 @@ void drawOverlay(cv::Mat &frame, const GaugeROI &gauge,
                 cv::FONT_HERSHEY_SIMPLEX, 1.2, cv::Scalar(0, 255, 255), 3);
 }
 
-static cv::Point gMarkClick;
-static bool gMarkClicked = false;
 
-static void onMarkClick(int event, int x, int y, int flags, void *userdata) {
-    if (event == cv::EVENT_LBUTTONDOWN && !gMarkClicked) {
-        gMarkClick = cv::Point(x, y);
-        gMarkClicked = true;
-    }
-}
 
-// Calibration state
-static int gCalibTrackMin = 0;   // min value * 100
-static int gCalibTrackMax = 400; // max value * 100
+static int gCalibTrackMin = 0;
+static int gCalibTrackMax = 400;
 static cv::Point gCalibPt;
-static int gCalibPhase = 0;   // 0=wait min click, 1=wait max click, 2=both set
+static int gCalibPhase = 0;   // 0=any mark, 1=min mark, 2=max mark, 3=done
 static bool gCalibClickDone = false;
+static double gScanRadius = 0;
+static std::vector<TickMark> gRawMarks;
+static std::vector<TickMark> gRefinedMarks;
+static cv::Point gPtMin, gPtMax;
+static cv::Mat gMarkDisp;
 
 static void onCalibClick(int event, int x, int y, int flags, void *userdata) {
-    if (event == cv::EVENT_LBUTTONDOWN && gCalibPhase < 2) {
+    if (event == cv::EVENT_LBUTTONDOWN && gCalibPhase < 3) {
         gCalibPt = cv::Point(x, y);
         gCalibClickDone = true;
     }
@@ -597,11 +589,7 @@ int main(int argc, char **argv) {
     std::cout << "  >> Gauge found at center=(" << gauge.center.x << ", "
               << gauge.center.y << "), radius=" << gauge.radius << "\n";
 
-    // Step 2: Calibrate — ask user to click on any one marking on the scale
     ScaleCalibration scale{0, 0, 0, 4, false};
-
-    std::cout << "\nCalibration: click on ANY marking on the gauge scale.\n";
-    std::cout << "  (a tick mark, a number, anything on the printed scale)\n";
 
     cv::Mat calibFrame = frame.clone();
     cv::circle(calibFrame, gauge.center, gauge.radius, cv::Scalar(0, 255, 0), 2);
@@ -610,88 +598,40 @@ int main(int argc, char **argv) {
     cv::resizeWindow("Calibration", calibFrame.cols, calibFrame.rows + 80);
     cv::createTrackbar("Min value (x100)", "Calibration", &gCalibTrackMin, 10000);
     cv::createTrackbar("Max value (x100)", "Calibration", &gCalibTrackMax, 10000);
-    cv::setMouseCallback("Calibration", onMarkClick, nullptr);
+    cv::setMouseCallback("Calibration", onCalibClick, nullptr);
 
-    while (!gMarkClicked) {
-        cv::Mat disp = calibFrame.clone();
-        cv::putText(disp, "Click on any marking on the gauge scale",
-                    cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
-                    cv::Scalar(0, 255, 255), 2);
-        cv::imshow("Calibration", disp);
-        int key = cv::waitKey(30);
-        if (key == 27 || key == 'q' || key == 'Q') {
-            cv::destroyWindow("Calibration");
-            return -1;
-        }
-    }
-
-    cv::circle(calibFrame, gMarkClick, 5, cv::Scalar(0, 0, 255), -1);
-    cv::imshow("Calibration", calibFrame);
-    cv::waitKey(500);
-
-    double scanRadius = cv::norm(gMarkClick - gauge.center);
-    scanRadius = std::clamp(scanRadius, gauge.radius * 0.3, gauge.radius * 0.95);
-    std::cout << "  >> Mark clicked at radius " << scanRadius
-              << " from center.\n";
-
-    // Step 3: Scan ring at that exact radius to find all markings
-    std::cout << "  >> Scanning ring at radius " << scanRadius << "...\n";
-    std::vector<TickMark> marks = scanRingAtRadius(frame, gauge, scanRadius, 720);
-    std::cout << "  >> Found " << marks.size() << " raw markings.\n";
-
-    // Refine using even-spacing constraint
-    int totalScaleMarks = 40;
-    std::vector<TickMark> refinedMarks = refineEvenSpacing(marks, totalScaleMarks);
-    std::cout << "  >> Refined to " << refinedMarks.size() << "/" << totalScaleMarks
-              << " evenly-spaced markings.\n";
-
-    // Draw marking positions for visual feedback (raw vs refined)
-    cv::Mat markDisp = frame.clone();
-    for (const auto &m : marks) {
-        cv::Point pt(
-            cvRound(gauge.center.x + scanRadius * std::cos(m.angle)),
-            cvRound(gauge.center.y + scanRadius * std::sin(m.angle)));
-        cv::circle(markDisp, pt, 3, cv::Scalar(0, 0, 255), -1);  // red = raw
-    }
-    for (const auto &m : refinedMarks) {
-        cv::Point pt(
-            cvRound(gauge.center.x + scanRadius * std::cos(m.angle)),
-            cvRound(gauge.center.y + scanRadius * std::sin(m.angle)));
-        cv::circle(markDisp, pt, 5, cv::Scalar(0, 255, 0), -1);  // green = refined
-    }
-    cv::putText(markDisp, "Red=raw, Green=refined. Press any key.",
-                cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
-                cv::Scalar(0, 255, 255), 2);
-    cv::imshow("Calibration", markDisp);
-    cv::waitKey(0);
-
-    // Step 4: Interactive calibration — trackbars already exist from creation above
     gCalibPhase = 0;
     gCalibClickDone = false;
     gCalibTrackMin = 0;
     gCalibTrackMax = 400;
     cv::setTrackbarPos("Min value (x100)", "Calibration", gCalibTrackMin);
     cv::setTrackbarPos("Max value (x100)", "Calibration", gCalibTrackMax);
-    cv::Point ptMin, ptMax;
     bool confirmed = false;
 
-    cv::setMouseCallback("Calibration", onCalibClick, nullptr);
-
     while (!confirmed) {
-        cv::Mat disp = markDisp.clone();
+        cv::Mat disp;
 
         if (gCalibPhase == 0) {
-            cv::putText(disp, "Click on the MINIMUM value marking",
-                        cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
-                        cv::Scalar(0, 255, 255), 2);
-        } else if (gCalibPhase == 1) {
-            cv::circle(disp, ptMin, 10, cv::Scalar(0, 255, 255), 2);
-            cv::putText(disp, "Now click on the MAXIMUM value marking",
+            disp = calibFrame.clone();
+            cv::putText(disp, "Click on ANY marking on the gauge scale",
                         cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
                         cv::Scalar(0, 255, 255), 2);
         } else {
-            cv::circle(disp, ptMin, 10, cv::Scalar(0, 255, 0), 2);
-            cv::circle(disp, ptMax, 10, cv::Scalar(0, 0, 255), 2);
+            disp = gMarkDisp.clone();
+        }
+
+        if (gCalibPhase == 1) {
+            cv::putText(disp, "Click on the MINIMUM value marking",
+                        cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                        cv::Scalar(0, 255, 255), 2);
+        } else if (gCalibPhase == 2) {
+            cv::circle(disp, gPtMin, 10, cv::Scalar(0, 255, 255), 2);
+            cv::putText(disp, "Now click on the MAXIMUM value marking",
+                        cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                        cv::Scalar(0, 255, 255), 2);
+        } else if (gCalibPhase == 3) {
+            cv::circle(disp, gPtMin, 10, cv::Scalar(0, 255, 0), 2);
+            cv::circle(disp, gPtMax, 10, cv::Scalar(0, 0, 255), 2);
             std::ostringstream oss;
             oss << "Min=" << std::fixed << std::setprecision(2)
                 << (gCalibTrackMin / 100.0)
@@ -707,26 +647,54 @@ int main(int argc, char **argv) {
 
         if (gCalibClickDone) {
             if (gCalibPhase == 0) {
-                ptMin = gCalibPt;
-                std::cout << "  >> Min marking at (" << ptMin.x << ", " << ptMin.y << ")\n";
+                gScanRadius = cv::norm(gCalibPt - gauge.center);
+                gScanRadius = std::clamp(gScanRadius, gauge.radius * 0.3, gauge.radius * 0.95);
+                std::cout << "  >> Mark clicked at radius " << gScanRadius
+                          << " from center.\n";
+                std::cout << "  >> Scanning ring at radius " << gScanRadius << "...\n";
+                gRawMarks = scanRingAtRadius(frame, gauge, gScanRadius, 720);
+                std::cout << "  >> Found " << gRawMarks.size() << " raw markings.\n";
+                gRefinedMarks = refineEvenSpacing(gRawMarks);
+                std::cout << "  >> Refined to " << gRefinedMarks.size()
+                          << " evenly-spaced markings.\n";
+
+                gMarkDisp = frame.clone();
+                cv::circle(gMarkDisp, gauge.center, gauge.radius, cv::Scalar(0, 255, 0), 2);
+                for (const auto &m : gRawMarks) {
+                    cv::Point pt(
+                        cvRound(gauge.center.x + gScanRadius * std::cos(m.angle)),
+                        cvRound(gauge.center.y + gScanRadius * std::sin(m.angle)));
+                    cv::circle(gMarkDisp, pt, 3, cv::Scalar(0, 0, 255), -1);
+                }
+                for (const auto &m : gRefinedMarks) {
+                    cv::Point pt(
+                        cvRound(gauge.center.x + gScanRadius * std::cos(m.angle)),
+                        cvRound(gauge.center.y + gScanRadius * std::sin(m.angle)));
+                    cv::circle(gMarkDisp, pt, 5, cv::Scalar(0, 255, 0), -1);
+                }
+
                 gCalibPhase = 1;
             } else if (gCalibPhase == 1) {
-                ptMax = gCalibPt;
-                std::cout << "  >> Max marking at (" << ptMax.x << ", " << ptMax.y << ")\n";
+                gPtMin = gCalibPt;
+                std::cout << "  >> Min marking at (" << gPtMin.x << ", " << gPtMin.y << ")\n";
                 gCalibPhase = 2;
+            } else if (gCalibPhase == 2) {
+                gPtMax = gCalibPt;
+                std::cout << "  >> Max marking at (" << gPtMax.x << ", " << gPtMax.y << ")\n";
+                gCalibPhase = 3;
             }
             gCalibClickDone = false;
         }
 
         int key = cv::waitKey(30);
-        if ((key == 13 || key == 32) && gCalibPhase == 2) confirmed = true;
+        if ((key == 13 || key == 32) && gCalibPhase == 3) confirmed = true;
         if (key == 27) break;
     }
 
     cv::destroyWindow("Calibration");
 
-    scale.startAngle = std::atan2(ptMin.y - gauge.center.y, ptMin.x - gauge.center.x);
-    scale.endAngle = std::atan2(ptMax.y - gauge.center.y, ptMax.x - gauge.center.x);
+    scale.startAngle = std::atan2(gPtMin.y - gauge.center.y, gPtMin.x - gauge.center.x);
+    scale.endAngle = std::atan2(gPtMax.y - gauge.center.y, gPtMax.x - gauge.center.x);
     scale.minValue = gCalibTrackMin / 100.0;
     scale.maxValue = gCalibTrackMax / 100.0;
     scale.valid = confirmed;
