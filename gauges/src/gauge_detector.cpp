@@ -1,4 +1,7 @@
 #include "gauge_detector.h"
+#include "imgui.h"
+#include <vector>
+#include <iostream>
 
 #include <algorithm>
 #include <cmath>
@@ -8,7 +11,6 @@
 #include <opencv2/opencv.hpp>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 // ═══════════════════════════════════════════════════════════════════
@@ -574,4 +576,98 @@ void GaugeDetector::handleClick(int clickX, int clickY) {
     std::cout << "  >> Max marking at (" << clickX << ", " << clickY << ")\n";
     setState(GaugeState::CALIB_CONFIRM);
   }
+}
+
+GaugeDetector::GaugeDetector(const cv::Point &center, int radius, const cv::Scalar &color) {
+    m_gauge = { center, radius };
+    setColor(color);
+    setState(GaugeState::CALIB_MIN);
+}
+
+bool GaugeDetector::renderCalibrationUI(size_t idx,
+                                        size_t &currentGaugeIdx,
+                                        std::vector<GaugeDetector> &detectors,
+                                        size_t detectedGaugesCount,
+                                        const std::string &videoPath,
+                                        cv::VideoWriter &writer,
+                                        double fps,
+                                        cv::Mat &frame,
+                                        cv::VideoCapture &cap) {
+    // CIRCLE_MANUAL messages
+    if (state() == GaugeState::CIRCLE_MANUAL) {
+        if (circleStage() == 1)
+            ImGui::TextColored(ImVec4(1,1,0,1),
+                               "Click on the CENTER of the gauge");
+        else
+            ImGui::TextColored(ImVec4(1,1,0,1),
+                               "Now click on the EDGE of the gauge face");
+    }
+
+    // CALIB_MIN
+    if (state() == GaugeState::CALIB_MIN) {
+        if (detectedGaugesCount > 1)
+            ImGui::Text("Gauge %zu / %zu",
+                        currentGaugeIdx + 1, detectors.size());
+        ImGui::TextColored(ImVec4(1,1,0,1),
+                           "Click on the MINIMUM value marking");
+    }
+
+    // CALIB_MAX
+    if (state() == GaugeState::CALIB_MAX)
+        ImGui::TextColored(ImVec4(1,1,0,1),
+                           "Now click on the MAXIMUM value marking");
+
+    // CALIB_CONFIRM: sliders and confirm/cancel handling
+    if (state() == GaugeState::CALIB_CONFIRM) {
+        if (detectedGaugesCount > 1)
+            ImGui::Text("Gauge %zu / %zu",
+                        currentGaugeIdx + 1, detectors.size());
+
+        int minVal = calibTrackMin();
+        int maxVal = calibTrackMax();
+        if (ImGui::SliderInt("Min value", &minVal, 0, 1000))
+            setCalibTrackMin(minVal);
+        if (ImGui::SliderInt("Max value", &maxVal, 0, 1000))
+            setCalibTrackMax(maxVal);
+        ImGui::Text("Min = %d   Max = %d",
+                    calibTrackMin(), calibTrackMax());
+        ImGui::Spacing();
+
+        if (ImGui::Button("Confirm", ImVec2(120, 0))) {
+            calibrateFromPoints(ptMin(), ptMax());
+            setCalibrationValues(calibTrackMin(), calibTrackMax());
+            setCalibrationValid(true);
+
+            const auto &s = scale();
+            std::cout << "  >> Gauge " << idx << " scale: "
+                      << s.minValue << " at "
+                      << (s.startAngle * 180.0 / PI) << " deg, "
+                      << s.maxValue << " at "
+                      << (s.endAngle * 180.0 / PI) << " deg\n";
+
+            // Advance to next detector or start processing
+            if (currentGaugeIdx + 1 < detectors.size()) {
+                currentGaugeIdx++;
+                detectors[currentGaugeIdx].setState(GaugeState::CALIB_MIN);
+            } else {
+                std::string outputPath =
+                    videoPath.substr(0, videoPath.find_last_of('.'))
+                    + "_output.avi";
+                int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
+                writer.open(outputPath, fourcc, fps, frame.size());
+                if (writer.isOpened())
+                    std::cout << "  >> Output: " << outputPath << "\n";
+                cap.set(cv::CAP_PROP_POS_FRAMES, 0);
+                for (auto &det : detectors)
+                    det.setState(GaugeState::PROCESSING);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            // Signal caller to break the main loop (same behavior as original code)
+            return true;
+        }
+    }
+
+    return false;
 }

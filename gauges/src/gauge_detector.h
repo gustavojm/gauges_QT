@@ -37,6 +37,9 @@ enum class GaugeState {
 
 class GaugeDetector {
 public:
+    GaugeDetector() = default;
+    GaugeDetector(const cv::Point &center, int radius, const cv::Scalar &color);
+
     // ─── Static: Find all gauges in a frame ─────────────────────────
     static std::vector<GaugeROI> findGauges(const cv::Mat &frame,
                                              int cannyThreshold,
@@ -119,6 +122,20 @@ public:
     //  - CALIB_MIN -> set ptMin, advance to CALIB_MAX
     //  - CALIB_MAX -> set ptMax, advance to CALIB_CONFIRM
     void handleClick(int clickX, int clickY);
+
+    // Render the calibration UI for this detector.
+    // Returns true if the user pressed "Cancel" (request to exit main loop).
+    // This method may modify currentGaugeIdx and the detectors vector (advance next,
+    // mark all detectors PROCESSING and open writer via the references passed).
+    bool renderCalibrationUI(size_t idx,
+                             size_t &currentGaugeIdx,
+                             std::vector<GaugeDetector> &detectors,
+                             size_t detectedGaugesCount,
+                             const std::string &videoPath,
+                             cv::VideoWriter &writer,
+                             double fps,
+                             cv::Mat &frame,
+                             cv::VideoCapture &cap);
 
 private:
     GaugeROI m_gauge{};
