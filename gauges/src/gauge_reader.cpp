@@ -13,17 +13,6 @@
 #include <numeric>
 #include <deque>
 
-// ─── Globals (GUI state shared across callbacks) ─────────────────
-
-static cv::Point gCircleCenter;
-static int gCircleRadius = 0;
-static int gCircleStage = 0;
-
-static int gCalibTrackMin = 0;
-static int gCalibTrackMax = 1000;
-static int gCalibPhase = 0;
-static cv::Point gPtMin, gPtMax;
-
 // ─── GLFW/ImGui Helpers ───────────────────────────────────────────
 
 static void glfw_error_callback(int error, const char *description) {
@@ -56,15 +45,6 @@ struct VideoTexture {
     void destroy() {
         if (id) { glDeleteTextures(1, &id); id = 0; w = h = 0; }
     }
-};
-
-enum AppState {
-    STATE_INIT,
-    STATE_CIRCLE_MANUAL,
-    STATE_CALIB_MIN,
-    STATE_CALIB_MAX,
-    STATE_CALIB_CONFIRM,
-    STATE_PROCESSING
 };
 
 static bool tryGetClickOnImage(int &outX, int &outY, int imageW, int imageH) {
@@ -136,8 +116,8 @@ int main(int argc, char **argv) {
 
     // ── App State ──────────────────────────────────────────────────
 
-    AppState state = STATE_INIT;
-    GaugeDetector detector;
+    std::vector<GaugeDetector> detectors;
+    size_t currentGaugeIdx = 0;
     VideoTexture videoTex;
     cv::Mat calibFrame;
     int frameCount = 0;
@@ -145,48 +125,74 @@ int main(int argc, char **argv) {
     // Video writer
     cv::VideoWriter writer;
 
+    // ── Initialization: find all gauges ────────────────────────────
+
+    std::cout << "Detecting gauge circles...\n";
+    std::vector<GaugeROI> gauges = GaugeDetector::findGauges(frame);
+    if (gauges.empty()) {
+        std::cout << "  >> No gauges found. Switching to manual mode.\n";
+        std::cout << "  >> Click center, then edge.\n";
+        detectors.emplace_back();
+        detectors[0].setState(GaugeState::CIRCLE_MANUAL);
+        detectors[0].setCircleStage(1);
+    } else {
+        std::cout << "  >> Found " << gauges.size() << " gauge(s):\n";
+        for (size_t i = 0; i < gauges.size(); i++) {
+            GaugeDetector d;
+            d.setCircle(gauges[i].center, gauges[i].radius);
+            std::cout << "    [" << i << "] at (" << gauges[i].center.x << ", "
+                      << gauges[i].center.y << "), radius=" << gauges[i].radius << "\n";
+            detectors.push_back(std::move(d));
+        }
+        calibFrame = frame.clone();
+        for (const auto &d : detectors) {
+            const auto &g = d.gauge();
+            cv::circle(calibFrame, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
+        }
+        detectors[currentGaugeIdx].setState(GaugeState::CALIB_MIN);
+    }
+
     // ── Main Loop ──────────────────────────────────────────────────
 
     while (!glfwWindowShouldClose(window)) {
-        // ── Frame acquisition ────────────────────────────────────────
-        if (state == STATE_PROCESSING) {
+        bool allProcessing = !detectors.empty();
+        for (const auto &d : detectors)
+            if (d.state() != GaugeState::PROCESSING) { allProcessing = false; break; }
+
+        // ── Frame acquisition (processing mode only) ────────────────
+        if (allProcessing) {
             if (!cap.read(frame)) break;
         }
 
-        // ── State machine work (runs once per state entry) ───────────
-        if (state == STATE_INIT && gCircleStage == 0) {
-            std::cout << "Detecting gauge circle...\n";
-            if (detector.detectCircle(frame)) {
-                const auto &g = detector.gauge();
-                std::cout << "  >> Gauge at (" << g.center.x << ", "
-                          << g.center.y << "), radius=" << g.radius << "\n";
-                calibFrame = frame.clone();
-                cv::circle(calibFrame, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
-                state = STATE_CALIB_MIN;
-            } else {
-                gCircleStage = 1;
-                state = STATE_CIRCLE_MANUAL;
-                std::cout << "  >> Auto circle detection failed.\n";
-                std::cout << "  >> Click center, then edge.\n";
-            }
-        }
-
-        // ── Calibrate from manual circle clicks ──────────────────────
-        if (state == STATE_CIRCLE_MANUAL && gCircleStage == 3 && gCircleRadius > 0) {
-            detector.setCircle(gCircleCenter, gCircleRadius);
-            const auto &g = detector.gauge();
-            std::cout << "  >> Gauge at (" << g.center.x << ", "
-                      << g.center.y << "), radius=" << g.radius << "\n";
-            calibFrame = frame.clone();
-            cv::circle(calibFrame, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
-            state = STATE_CALIB_MIN;
-        }
+        // ── State machine transitions ───────────────────────────────
+        // if (!allProcessing && !detectors.empty()) {
+        //     // Manual circle -> calibration transition
+        //     if (gauges.empty()) {
+        //         auto &d = detectors[0];
+        //         if (d.state() == GaugeState::CIRCLE_MANUAL &&
+        //             d.circleStage() == 3 && d.circleRadius() > 0) {
+        //             d.setCircle(d.circleCenter(), d.circleRadius());
+        //             const auto &g = d.gauge();
+        //             std::cout << "  >> Gauge at (" << g.center.x << ", "
+        //                       << g.center.y << "), radius=" << g.radius << "\n";
+        //             calibFrame = frame.clone();
+        //             cv::circle(calibFrame, g.center, g.radius,
+        //                        cv::Scalar(0, 255, 0), 2);
+        //             d.setState(GaugeState::CALIB_MIN);
+        //         }
+        //     }
+        // }
 
         // ── Processing work ──────────────────────────────────────────
-        if (state == STATE_PROCESSING) {
-            double value = detector.detectNeedle(frame);            
+        if (allProcessing) {
+            for (auto &d : detectors)
+                d.detectNeedle(frame);
 
-            detector.drawOverlay(frame);
+            int labelY = 60;
+            for (auto &d : detectors) {
+                d.drawOverlay(frame, labelY);
+                labelY += 30;
+            }
 
             if (writer.isOpened())
                 writer.write(frame);
@@ -194,25 +200,30 @@ int main(int argc, char **argv) {
 
         // ── Build display image ──────────────────────────────────────
         cv::Mat disp;
-        if (state == STATE_INIT) {
-            disp = frame.clone();
-        } else if (state == STATE_CIRCLE_MANUAL) {
-            disp = frame.clone();
-            if (gCircleStage == 2) {
-                cv::circle(disp, gCircleCenter, 5, cv::Scalar(0, 255, 0), -1);
-                cv::circle(disp, gCircleCenter, 30, cv::Scalar(0, 255, 0), 1);
-            }
-        } else if (state >= STATE_CALIB_MIN && state <= STATE_CALIB_CONFIRM) {
+        if (allProcessing) {
+            disp = frame;
+        } else if (!calibFrame.empty()) {
             disp = calibFrame.clone();
-            if (state >= STATE_CALIB_MAX) {
-                cv::circle(disp, gPtMin, 10, cv::Scalar(0, 255, 255), 2);
-            }
-            if (state == STATE_CALIB_CONFIRM) {
-                cv::circle(disp, gPtMin, 10, cv::Scalar(0, 255, 0), 2);
-                cv::circle(disp, gPtMax, 10, cv::Scalar(0, 0, 255), 2);
+            if (!detectors.empty()) {
+                size_t idx = gauges.empty() ? 0 : currentGaugeIdx;
+                auto &d = detectors[idx];
+                if (d.state() == GaugeState::CALIB_MAX) {
+                    cv::circle(disp, d.ptMin(), 10, cv::Scalar(0, 255, 255), 2);
+                } else if (d.state() == GaugeState::CALIB_CONFIRM) {
+                    cv::circle(disp, d.ptMin(), 10, cv::Scalar(0, 255, 0), 2);
+                    cv::circle(disp, d.ptMax(), 10, cv::Scalar(0, 0, 255), 2);
+                }
             }
         } else {
-            disp = frame; // PROCESSING: overlay already drawn
+            disp = frame.clone();
+            if (!detectors.empty()) {
+                auto &d = detectors[0];
+                if (d.state() == GaugeState::CIRCLE_MANUAL &&
+                    d.circleStage() == 2) {
+                    cv::circle(disp, d.circleCenter(), 5, cv::Scalar(0, 255, 0), -1);
+                    cv::circle(disp, d.circleCenter(), 30, cv::Scalar(0, 255, 0), 1);
+                }
+            }
         }
 
         // ── Upload texture ───────────────────────────────────────────
@@ -247,95 +258,132 @@ int main(int argc, char **argv) {
         // ── Handle clicks ────────────────────────────────────────────
         int clickX = -1, clickY = -1;
         if (tryGetClickOnImage(clickX, clickY, disp.cols, disp.rows)) {
-            if (state == STATE_CIRCLE_MANUAL) {
-                if (gCircleStage == 1) {
-                    gCircleCenter = cv::Point(clickX, clickY);
-                    std::cout << "  >> Center at (" << clickX << ", " << clickY << ")\n";
-                    gCircleStage = 2;
-                } else if (gCircleStage == 2) {
-                    gCircleRadius = cvRound(cv::norm(cv::Point(clickX, clickY) - gCircleCenter));
-                    std::cout << "  >> Radius set to " << gCircleRadius << "\n";
-                    gCircleStage = 3;
+            if (!detectors.empty()) {
+                size_t idx = gauges.empty() ? 0 : currentGaugeIdx;
+                auto &d = detectors[idx];
+                if (d.state() == GaugeState::CIRCLE_MANUAL) {
+                    if (d.circleStage() == 1) {
+                        d.setCircleCenter(cv::Point(clickX, clickY));
+                        std::cout << "  >> Center at (" << clickX << ", "
+                                  << clickY << ")\n";
+                        d.setCircleStage(2);
+                    } else if (d.circleStage() == 2) {
+                        int r = cvRound(cv::norm(cv::Point(clickX, clickY) -
+                                                  d.circleCenter()));
+                        d.setCircleRadius(r);
+                        std::cout << "  >> Radius set to " << r << "\n";
+                        d.setCircleStage(3);
+                    }
+                } else if (d.state() == GaugeState::CALIB_MIN) {
+                    d.setPtMin(cv::Point(clickX, clickY));
+                    std::cout << "  >> Min marking at (" << clickX << ", "
+                              << clickY << ")\n";
+                    d.setState(GaugeState::CALIB_MAX);
+                } else if (d.state() == GaugeState::CALIB_MAX) {
+                    d.setPtMax(cv::Point(clickX, clickY));
+                    std::cout << "  >> Max marking at (" << clickX << ", "
+                              << clickY << ")\n";
+                    d.setState(GaugeState::CALIB_CONFIRM);
                 }
-            } else if (state == STATE_CALIB_MIN) {
-                gPtMin = cv::Point(clickX, clickY);
-                std::cout << "  >> Min marking at (" << clickX << ", " << clickY << ")\n";
-                state = STATE_CALIB_MAX;
-            } else if (state == STATE_CALIB_MAX) {
-                gPtMax = cv::Point(clickX, clickY);
-                std::cout << "  >> Max marking at (" << clickX << ", " << clickY << ")\n";
-                state = STATE_CALIB_CONFIRM;
             }
         }
 
         // ── State UI ─────────────────────────────────────────────────
         ImGui::Spacing();
 
-        if (state == STATE_INIT) {
-            ImGui::Text("Detecting gauge circle...");
-            ImGui::TextColored(ImVec4(1,1,0,1), "Press SPACE to retry");
-        }
+        if (!allProcessing && !detectors.empty()) {
+            size_t idx = gauges.empty() ? 0 : currentGaugeIdx;
+            auto &d = detectors[idx];
 
-        if (state == STATE_CIRCLE_MANUAL) {
-            if (gCircleStage == 1)
-                ImGui::TextColored(ImVec4(1,1,0,1), "Click on the CENTER of the gauge");
-            else
-                ImGui::TextColored(ImVec4(1,1,0,1), "Now click on the EDGE of the gauge face");
-        }
-
-        if (state == STATE_CALIB_MIN)
-            ImGui::TextColored(ImVec4(1,1,0,1), "Click on the MINIMUM value marking");
-
-        if (state == STATE_CALIB_MAX)
-            ImGui::TextColored(ImVec4(1,1,0,1), "Now click on the MAXIMUM value marking");
-
-        if (state == STATE_CALIB_CONFIRM) {
-            ImGui::SliderInt("Min value", &gCalibTrackMin, 0, 1000);
-            ImGui::SliderInt("Max value", &gCalibTrackMax, 0, 1000);
-            ImGui::Text("Min = %d   Max = %d", gCalibTrackMin, gCalibTrackMax);
-            ImGui::Spacing();
-
-            {
-                float sa = detector.scale().startAngle;
-                float ea = detector.scale().endAngle;
-                if (ImGui::InputFloat("Min angle", &sa, 0.01f, 0.1f, "%.3f rad"))
-                    detector.setStartAngle(sa);
-                if (ImGui::InputFloat("Max angle", &ea, 0.01f, 0.1f, "%.3f rad"))
-                    detector.setEndAngle(ea);
+            if (d.state() == GaugeState::CIRCLE_MANUAL) {
+                if (d.circleStage() == 1)
+                    ImGui::TextColored(ImVec4(1,1,0,1),
+                                       "Click on the CENTER of the gauge");
+                else
+                    ImGui::TextColored(ImVec4(1,1,0,1),
+                                       "Now click on the EDGE of the gauge face");
             }
 
-            if (ImGui::Button("Confirm", ImVec2(120, 0))) {
-                detector.calibrateFromPoints(gPtMin, gPtMax);
-                detector.setCalibrationValues(gCalibTrackMin, gCalibTrackMax);
-                detector.setCalibrationValid(true);
-
-                const auto &s = detector.scale();
-                std::cout << "  >> Scale: " << s.minValue << " at "
-                          << (s.startAngle * 180.0 / PI) << " deg, "
-                          << s.maxValue << " at "
-                          << (s.endAngle * 180.0 / PI) << " deg\n";
-
-                std::string outputPath = videoPath.substr(0, videoPath.find_last_of('.')) + "_output.avi";
-                int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-                writer.open(outputPath, fourcc, fps, frame.size());
-                if (writer.isOpened())
-                    std::cout << "  >> Output: " << outputPath << "\n";
-
-                cap.set(cv::CAP_PROP_POS_FRAMES, 0);
-                state = STATE_PROCESSING;
+            if (d.state() == GaugeState::CALIB_MIN) {
+                if (gauges.size() > 1)
+                    ImGui::Text("Gauge %zu / %zu",
+                                currentGaugeIdx + 1, detectors.size());
+                ImGui::TextColored(ImVec4(1,1,0,1),
+                                   "Click on the MINIMUM value marking");
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(120, 0))) break;
+
+            if (d.state() == GaugeState::CALIB_MAX)
+                ImGui::TextColored(ImVec4(1,1,0,1),
+                                   "Now click on the MAXIMUM value marking");
+
+            if (d.state() == GaugeState::CALIB_CONFIRM) {
+                if (gauges.size() > 1)
+                    ImGui::Text("Gauge %zu / %zu",
+                                currentGaugeIdx + 1, detectors.size());
+
+                int minVal = d.calibTrackMin();
+                int maxVal = d.calibTrackMax();
+                if (ImGui::SliderInt("Min value", &minVal, 0, 1000))
+                    d.setCalibTrackMin(minVal);
+                if (ImGui::SliderInt("Max value", &maxVal, 0, 1000))
+                    d.setCalibTrackMax(maxVal);
+                ImGui::Text("Min = %d   Max = %d",
+                            d.calibTrackMin(), d.calibTrackMax());
+                ImGui::Spacing();
+
+                {
+                    float sa = static_cast<float>(d.scale().startAngle);
+                    float ea = static_cast<float>(d.scale().endAngle);
+                    if (ImGui::InputFloat("Min angle", &sa, 0.01f, 0.1f, "%.3f rad"))
+                        d.setStartAngle(sa);
+                    if (ImGui::InputFloat("Max angle", &ea, 0.01f, 0.1f, "%.3f rad"))
+                        d.setEndAngle(ea);
+                }
+
+                if (ImGui::Button("Confirm", ImVec2(120, 0))) {
+                    d.calibrateFromPoints(d.ptMin(), d.ptMax());
+                    d.setCalibrationValues(d.calibTrackMin(), d.calibTrackMax());
+                    d.setCalibrationValid(true);
+
+                    const auto &s = d.scale();
+                    std::cout << "  >> Gauge " << idx << " scale: "
+                              << s.minValue << " at "
+                              << (s.startAngle * 180.0 / PI) << " deg, "
+                              << s.maxValue << " at "
+                              << (s.endAngle * 180.0 / PI) << " deg\n";
+
+                    if (currentGaugeIdx + 1 < detectors.size()) {
+                        currentGaugeIdx++;
+                        detectors[currentGaugeIdx].setState(GaugeState::CALIB_MIN);
+                    } else {
+                        std::string outputPath =
+                            videoPath.substr(0, videoPath.find_last_of('.'))
+                            + "_output.avi";
+                        int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
+                        writer.open(outputPath, fourcc, fps, frame.size());
+                        if (writer.isOpened())
+                            std::cout << "  >> Output: " << outputPath << "\n";
+                        cap.set(cv::CAP_PROP_POS_FRAMES, 0);
+                        for (auto &det : detectors)
+                            det.setState(GaugeState::PROCESSING);
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0))) break;
+            }
         }
 
-        if (state == STATE_PROCESSING) {
+        if (allProcessing) {
             ImGui::Text("Frame %d / %d", frameCount, totalFrames);
-            ImGui::TextColored(ImVec4(0,1,1,1),
-                               "Value: %.2f", detector.getSmoothedValue());
+            for (size_t i = 0; i < detectors.size(); i++) {
+                ImGui::TextColored(ImVec4(0,1,1,1),
+                                   "Gauge %zu: %.2f",
+                                   i + 1, detectors[i].getSmoothedValue());
+            }
             ImGui::Spacing();
             if (ImGui::Button("Restart", ImVec2(80, 0))) {
                 cap.set(cv::CAP_PROP_POS_FRAMES, 0);
-                detector.resetSmoothing();
+                for (auto &d : detectors) d.resetSmoothing();
                 frameCount = 0;
             }
             ImGui::SameLine();
