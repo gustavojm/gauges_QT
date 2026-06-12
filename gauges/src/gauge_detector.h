@@ -112,6 +112,14 @@ public:
     // ─── Reset ──────────────────────────────────────────────────────
     void reset();
 
+    // Handle a click coming from the UI while in manual / calibration modes.
+    // Behavior matches previous inline code in gauge_reader.cpp:
+    //  - CIRCLE_MANUAL stage 1 -> set center, advance to stage 2
+    //  - CIRCLE_MANUAL stage 2 -> set radius, advance to stage 3
+    //  - CALIB_MIN -> set ptMin, advance to CALIB_MAX
+    //  - CALIB_MAX -> set ptMax, advance to CALIB_CONFIRM
+    void handleClick(int clickX, int clickY);
+
 private:
     GaugeROI m_gauge{};
     ScaleCalibration m_scale{0, 0, 0, 1000, false};

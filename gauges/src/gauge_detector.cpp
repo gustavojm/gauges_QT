@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <iostream>
 #include <numeric>
 #include <opencv2/opencv.hpp>
 #include <sstream>
@@ -550,4 +551,27 @@ GaugeDetector::refineEvenSpacing(const std::vector<TickMark> &marks) {
       refined.begin(), refined.end(),
       [](const TickMark &a, const TickMark &b) { return a.angle < b.angle; });
   return refined;
+}
+
+void GaugeDetector::handleClick(int clickX, int clickY) {
+  if (state() == GaugeState::CIRCLE_MANUAL) {
+    if (circleStage() == 1) {
+      setCircleCenter(cv::Point(clickX, clickY));
+      std::cout << "  >> Center at (" << clickX << ", " << clickY << ")\n";
+      setCircleStage(2);
+    } else if (circleStage() == 2) {
+      int r = cvRound(cv::norm(cv::Point(clickX, clickY) - circleCenter()));
+      setCircleRadius(r);
+      std::cout << "  >> Radius set to " << r << "\n";
+      setCircleStage(3);
+    }
+  } else if (state() == GaugeState::CALIB_MIN) {
+    setPtMin(cv::Point(clickX, clickY));
+    std::cout << "  >> Min marking at (" << clickX << ", " << clickY << ")\n";
+    setState(GaugeState::CALIB_MAX);
+  } else if (state() == GaugeState::CALIB_MAX) {
+    setPtMax(cv::Point(clickX, clickY));
+    std::cout << "  >> Max marking at (" << clickX << ", " << clickY << ")\n";
+    setState(GaugeState::CALIB_CONFIRM);
+  }
 }

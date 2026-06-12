@@ -265,31 +265,8 @@ int main(int argc, char **argv) {
         if (tryGetClickOnImage(clickX, clickY, disp.cols, disp.rows)) {
             if (!detectors.empty()) {
                 size_t idx = gauges.empty() ? 0 : currentGaugeIdx;
-                auto &d = detectors[idx];
-                if (d.state() == GaugeState::CIRCLE_MANUAL) {
-                    if (d.circleStage() == 1) {
-                        d.setCircleCenter(cv::Point(clickX, clickY));
-                        std::cout << "  >> Center at (" << clickX << ", "
-                                  << clickY << ")\n";
-                        d.setCircleStage(2);
-                    } else if (d.circleStage() == 2) {
-                        int r = cvRound(cv::norm(cv::Point(clickX, clickY) -
-                                                  d.circleCenter()));
-                        d.setCircleRadius(r);
-                        std::cout << "  >> Radius set to " << r << "\n";
-                        d.setCircleStage(3);
-                    }
-                } else if (d.state() == GaugeState::CALIB_MIN) {
-                    d.setPtMin(cv::Point(clickX, clickY));
-                    std::cout << "  >> Min marking at (" << clickX << ", "
-                              << clickY << ")\n";
-                    d.setState(GaugeState::CALIB_MAX);
-                } else if (d.state() == GaugeState::CALIB_MAX) {
-                    d.setPtMax(cv::Point(clickX, clickY));
-                    std::cout << "  >> Max marking at (" << clickX << ", "
-                              << clickY << ")\n";
-                    d.setState(GaugeState::CALIB_CONFIRM);
-                }
+                // Delegate click handling to the detector instance
+                detectors[idx].handleClick(clickX, clickY);
             }
         }
 
