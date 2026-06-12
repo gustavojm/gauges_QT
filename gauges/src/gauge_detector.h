@@ -2,6 +2,7 @@
 
 #include <opencv2/opencv.hpp>
 #include <vector>
+#include <deque>
 
 struct GaugeROI {
     cv::Point center;
@@ -36,7 +37,7 @@ public:
 
     // ─── Needle Detection ─────────────────────────────────────────────
     // Detect needle angle in current frame. Returns angle in radians or -1.
-    double detectNeedle(const cv::Mat &frame) const;
+    double detectNeedle(const cv::Mat &frame);
 
     // ─── Calibration ──────────────────────────────────────────────────
     // Compute start/end angles from user-clicked min/max points
@@ -58,7 +59,7 @@ public:
 
     // ─── Overlay Drawing ──────────────────────────────────────────────
     // Draw gauge circle, scale lines, needle, and value text on frame
-    void drawOverlay(cv::Mat &frame, double needleAngle, double value) const;
+    void drawOverlay(cv::Mat &frame) const;
 
     // ─── State Access ─────────────────────────────────────────────────
     const GaugeROI &gauge() const { return m_gauge; }
@@ -73,6 +74,14 @@ public:
                                                    int numAngles = 720);
     static std::vector<TickMark> refineEvenSpacing(const std::vector<TickMark> &marks);
 
+    double smoothReadings(double value);
+    double getSmoothedValue() const;
+
+    void resetSmoothing() {
+        valueHistory.clear();
+        smoothedValue = 0;
+    }   
+
 private:
     GaugeROI m_gauge{};
     ScaleCalibration m_scale{0, 0, 0, 1000, false};
@@ -80,4 +89,11 @@ private:
     cv::Mat createMask(const cv::Mat &frame) const;
     double detectColoredNeedle(const cv::Mat &frame) const;
     double detectNeedleRadial(const cv::Mat &frame) const;
+
+    std::deque<double> valueHistory;
+    const int smoothWindow = 5;
+    double angle = -1;
+    double value = -1;
+    double smoothedValue = 0;
+
 };

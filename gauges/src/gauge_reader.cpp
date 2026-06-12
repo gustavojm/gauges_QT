@@ -8,7 +8,6 @@
 #include <iostream>
 #include <cmath>
 #include <string>
-#include <vector>
 #include <algorithm>
 #include <iomanip>
 #include <numeric>
@@ -141,12 +140,7 @@ int main(int argc, char **argv) {
     GaugeDetector detector;
     VideoTexture videoTex;
     cv::Mat calibFrame;
-
-    // Processing state
-    std::deque<double> valueHistory;
-    const int smoothWindow = 5;
     int frameCount = 0;
-    double lastSmoothValue = 0;
 
     // Video writer
     cv::VideoWriter writer;
@@ -190,22 +184,9 @@ int main(int argc, char **argv) {
 
         // ── Processing work ──────────────────────────────────────────
         if (state == STATE_PROCESSING) {
-            double needleAngle = detector.detectNeedle(frame);
-            double value = detector.angleToValue(needleAngle);
+            double value = detector.detectNeedle(frame);            
 
-            if (value >= 0) {
-                valueHistory.push_back(value);
-                if (valueHistory.size() > smoothWindow)
-                    valueHistory.pop_front();
-            }
-
-            lastSmoothValue = value;
-            if (!valueHistory.empty()) {
-                lastSmoothValue = std::accumulate(valueHistory.begin(), valueHistory.end(), 0.0)
-                                  / valueHistory.size();
-            }
-
-            detector.drawOverlay(frame, needleAngle, lastSmoothValue);
+            detector.drawOverlay(frame);
 
             if (writer.isOpened())
                 writer.write(frame);
@@ -350,11 +331,11 @@ int main(int argc, char **argv) {
         if (state == STATE_PROCESSING) {
             ImGui::Text("Frame %d / %d", frameCount, totalFrames);
             ImGui::TextColored(ImVec4(0,1,1,1),
-                               "Value: %.2f", lastSmoothValue);
+                               "Value: %.2f", detector.getSmoothedValue());
             ImGui::Spacing();
             if (ImGui::Button("Restart", ImVec2(80, 0))) {
                 cap.set(cv::CAP_PROP_POS_FRAMES, 0);
-                valueHistory.clear();
+                detector.resetSmoothing();
                 frameCount = 0;
             }
             ImGui::SameLine();
@@ -382,12 +363,6 @@ int main(int argc, char **argv) {
 
     if (frameCount > 0) {
         std::cout << "\n\nDone! " << frameCount << " frames processed.\n";
-        if (!valueHistory.empty()) {
-            double finalValue = std::accumulate(valueHistory.begin(), valueHistory.end(), 0.0)
-                                / valueHistory.size();
-            std::cout << "Final reading: " << std::fixed << std::setprecision(3)
-                      << finalValue << "\n";
-        }
     }
 
     videoTex.destroy();

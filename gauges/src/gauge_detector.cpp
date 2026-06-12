@@ -1,12 +1,15 @@
 #include "gauge_detector.h"
 
-#include <opencv2/opencv.hpp>
-#include <vector>
 #include <algorithm>
 #include <cmath>
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <numeric>
+#include <opencv2/opencv.hpp>
+#include <sstream>
+#include <string>
+#include <vector>
 
 // ═══════════════════════════════════════════════════════════════════
 //  Circle Detection
@@ -20,19 +23,22 @@ bool GaugeDetector::detectCircle(const cv::Mat &frame) {
     int minR = maxDim / 15;
     int maxR = maxDim / 2;
 
-    struct Params { double dp; int canny; int acc; };
+  struct Params {
+    double dp;
+    int canny;
+    int acc;
+  };
     std::vector<Params> paramSets = {
-        {1, 80, 40}, {1, 100, 50}, {1, 60, 30},
-        {1.2, 80, 40}, {1.2, 100, 50},
-        {1.5, 80, 30}, {2, 100, 40},
+      {1, 80, 40},    {1, 100, 50},  {1, 60, 30},  {1.2, 80, 40},
+      {1.2, 100, 50}, {1.5, 80, 30}, {2, 100, 40},
     };
 
     for (const auto &p : paramSets) {
         cv::Mat blurred;
         cv::GaussianBlur(gray, blurred, cv::Size(9, 9), 2, 2);
         std::vector<cv::Vec3f> circles;
-        cv::HoughCircles(blurred, circles, cv::HOUGH_GRADIENT, p.dp,
-                         gray.rows / 6, p.canny, p.acc, minR, maxR);
+    cv::HoughCircles(blurred, circles, cv::HOUGH_GRADIENT, p.dp, gray.rows / 6,
+                     p.canny, p.acc, minR, maxR);
         if (!circles.empty()) {
             const auto &c = circles[0];
             m_gauge = {cv::Point(cvRound(c[0]), cvRound(c[1])), cvRound(c[2])};
@@ -42,8 +48,8 @@ bool GaugeDetector::detectCircle(const cv::Mat &frame) {
 
     for (const auto &p : paramSets) {
         std::vector<cv::Vec3f> circles;
-        cv::HoughCircles(gray, circles, cv::HOUGH_GRADIENT, p.dp,
-                         gray.rows / 6, p.canny, p.acc, minR, maxR);
+    cv::HoughCircles(gray, circles, cv::HOUGH_GRADIENT, p.dp, gray.rows / 6,
+                     p.canny, p.acc, minR, maxR);
         if (!circles.empty()) {
             const auto &c = circles[0];
             m_gauge = {cv::Point(cvRound(c[0]), cvRound(c[1])), cvRound(c[2])};
@@ -90,32 +96,44 @@ double GaugeDetector::detectColoredNeedle(const cv::Mat &frame) const {
     cv::morphologyEx(redMask, redMask, cv::MORPH_OPEN, kernel);
 
     std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(redMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-    if (contours.empty()) return -1;
+  cv::findContours(redMask, contours, cv::RETR_EXTERNAL,
+                   cv::CHAIN_APPROX_SIMPLE);
+  if (contours.empty())
+    return -1;
 
     int bestIdx = -1;
     double bestScore = 0;
     for (size_t i = 0; i < contours.size(); i++) {
         double area = cv::contourArea(contours[i]);
-        if (area < m_gauge.radius * 0.5) continue;
+    if (area < m_gauge.radius * 0.5)
+      continue;
         cv::Moments m = cv::moments(contours[i]);
-        if (m.m00 == 0) continue;
+    if (m.m00 == 0)
+      continue;
         cv::Point centroid(cvRound(m.m10 / m.m00), cvRound(m.m01 / m.m00));
-        if (cv::norm(centroid - m_gauge.center) > m_gauge.radius * 0.6) continue;
+    if (cv::norm(centroid - m_gauge.center) > m_gauge.radius * 0.6)
+      continue;
         double maxDist = 0;
         for (const auto &pt : contours[i])
             maxDist = std::max(maxDist, cv::norm(pt - m_gauge.center));
         double score = maxDist * std::log(area + 1);
-        if (score > bestScore) { bestScore = score; bestIdx = i; }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
     }
 
-    if (bestIdx < 0) return -1;
+  if (bestIdx < 0)
+    return -1;
 
     double maxDist = 0;
     cv::Point tip;
     for (const auto &pt : contours[bestIdx]) {
         double d = cv::norm(pt - m_gauge.center);
-        if (d > maxDist) { maxDist = d; tip = pt; }
+    if (d > maxDist) {
+      maxDist = d;
+      tip = pt;
+    }
     }
     return std::atan2(tip.y - m_gauge.center.y, tip.x - m_gauge.center.x);
 }
@@ -150,40 +168,76 @@ double GaugeDetector::detectNeedleRadial(const cv::Mat &frame) const {
         for (int r = startR; r < endR; r++) {
             int x = cvRound(m_gauge.center.x + r * std::cos(angle));
             int y = cvRound(m_gauge.center.y + r * std::sin(angle));
-            if (x < 0 || x >= binary.cols || y < 0 || y >= binary.rows) break;
-            if (mask.at<uchar>(y, x) == 0) break;
+      if (x < 0 || x >= binary.cols || y < 0 || y >= binary.rows)
+        break;
+      if (mask.at<uchar>(y, x) == 0)
+        break;
             totalScan++;
             if (binary.at<uchar>(y, x) > 0) {
                 totalDark++;
-                if (!inRun) { inRun = true; darkRun = 1; }
-                else darkRun++;
-                if (darkRun > longestRun) longestRun = darkRun;
-            } else inRun = false;
+        if (!inRun) {
+          inRun = true;
+          darkRun = 1;
+        } else
+          darkRun++;
+        if (darkRun > longestRun)
+          longestRun = darkRun;
+      } else
+        inRun = false;
         }
-        if (inRun && darkRun > longestRun) longestRun = darkRun;
+    if (inRun && darkRun > longestRun)
+      longestRun = darkRun;
         double density = totalScan > 0 ? (double)totalDark / totalScan : 0;
         double reach = totalScan > 0 ? (double)longestRun / m_gauge.radius : 0;
         double score = density * 0.4 + reach * 0.6;
-        if (score > bestScore) { bestScore = score; bestAngle = angle; }
+    if (score > bestScore) {
+      bestScore = score;
+      bestAngle = angle;
+    }
     }
     return bestAngle;
 }
 
-double GaugeDetector::detectNeedle(const cv::Mat &frame) const {
-    double angle = detectColoredNeedle(frame);
-    if (angle >= 0) return angle;
-    return detectNeedleRadial(frame);
+double GaugeDetector::smoothReadings(double value) {
+  if (value >= 0) {
+    valueHistory.push_back(value);
+    if (valueHistory.size() > smoothWindow)
+      valueHistory.pop_front();
+  }
+
+  smoothedValue = value;
+  if (!valueHistory.empty()) {
+    smoothedValue =
+        std::accumulate(valueHistory.begin(), valueHistory.end(), 0.0) /
+        valueHistory.size();
+  }
+  return smoothedValue;
+}
+
+double GaugeDetector::detectNeedle(const cv::Mat &frame) {
+  angle = detectColoredNeedle(frame);
+  if (angle < 0) {
+    angle = detectNeedleRadial(frame);
+  }
+
+  if (angle >= 0) {
+    value = angleToValue(angle);    
+    smoothReadings(value);
+    return value;
+  }
+  return -1;
 }
 
 // ═══════════════════════════════════════════════════════════════════
 //  Calibration
 // ═══════════════════════════════════════════════════════════════════
 
-void GaugeDetector::calibrateFromPoints(const cv::Point &ptMin, const cv::Point &ptMax) {
-    m_scale.startAngle = std::atan2(ptMin.y - m_gauge.center.y,
-                                    ptMin.x - m_gauge.center.x);
-    m_scale.endAngle = std::atan2(ptMax.y - m_gauge.center.y,
-                                  ptMax.x - m_gauge.center.x);
+void GaugeDetector::calibrateFromPoints(const cv::Point &ptMin,
+                                        const cv::Point &ptMax) {
+  m_scale.startAngle =
+      std::atan2(ptMin.y - m_gauge.center.y, ptMin.x - m_gauge.center.x);
+  m_scale.endAngle =
+      std::atan2(ptMax.y - m_gauge.center.y, ptMax.x - m_gauge.center.x);
 }
 
 void GaugeDetector::setCalibrationValues(double minVal, double maxVal) {
@@ -191,26 +245,22 @@ void GaugeDetector::setCalibrationValues(double minVal, double maxVal) {
     m_scale.maxValue = maxVal;
 }
 
-void GaugeDetector::setCalibrationValid(bool valid) {
-    m_scale.valid = valid;
-}
+void GaugeDetector::setCalibrationValid(bool valid) { m_scale.valid = valid; }
 
-void GaugeDetector::setStartAngle(double a) {
-    m_scale.startAngle = a;
-}
+void GaugeDetector::setStartAngle(double a) { m_scale.startAngle = a; }
 
-void GaugeDetector::setEndAngle(double a) {
-    m_scale.endAngle = a;
-}
+void GaugeDetector::setEndAngle(double a) { m_scale.endAngle = a; }
 
 // ═══════════════════════════════════════════════════════════════════
 //  Angle-to-Value
 // ═══════════════════════════════════════════════════════════════════
 
 double GaugeDetector::angleToValue(double needleAngle) const {
-    if (!m_scale.valid || needleAngle < 0) return -1;
+  if (!m_scale.valid || needleAngle < 0)
+    return -1;
     auto normalize = [](double a) {
-        a = std::fmod(a, 2.0 * PI); return a < 0 ? a + 2.0 * PI : a;
+    a = std::fmod(a, 2.0 * PI);
+    return a < 0 ? a + 2.0 * PI : a;
     };
     double start = normalize(m_scale.startAngle);
     double end = normalize(m_scale.endAngle);
@@ -219,13 +269,19 @@ double GaugeDetector::angleToValue(double needleAngle) const {
     double range = (end > start) ? (end - start) : ((2.0 * PI - start) + end);
     double pos;
     if (end > start) {
-        if (needle >= start && needle <= end) pos = (needle - start) / range;
-        else if (needle < start) pos = ((needle + 2.0 * PI) - start) / range;
-        else pos = (needle - start) / range;
+    if (needle >= start && needle <= end)
+      pos = (needle - start) / range;
+    else if (needle < start)
+      pos = ((needle + 2.0 * PI) - start) / range;
+    else
+      pos = (needle - start) / range;
     } else {
-        if (needle >= start) pos = (needle - start) / range;
-        else if (needle <= end) pos = ((needle + 2.0 * PI) - start) / range;
-        else return -1;
+    if (needle >= start)
+      pos = (needle - start) / range;
+    else if (needle <= end)
+      pos = ((needle + 2.0 * PI) - start) / range;
+    else
+      return -1;
     }
     pos = std::clamp(pos, 0.0, 1.0);
     return m_scale.minValue + pos * (m_scale.maxValue - m_scale.minValue);
@@ -235,36 +291,44 @@ double GaugeDetector::angleToValue(double needleAngle) const {
 //  Overlay Drawing
 // ═══════════════════════════════════════════════════════════════════
 
-void GaugeDetector::drawOverlay(cv::Mat &frame, double needleAngle, double value) const {
+void GaugeDetector::drawOverlay(cv::Mat &frame) const {
     if (m_gauge.radius > 0) {
         cv::circle(frame, m_gauge.center, m_gauge.radius, cv::Scalar(0, 255, 0), 2);
         if (m_scale.valid) {
             cv::Point startPt(
-                m_gauge.center.x + cvRound(m_gauge.radius * 0.85 * std::cos(m_scale.startAngle)),
-                m_gauge.center.y + cvRound(m_gauge.radius * 0.85 * std::sin(m_scale.startAngle)));
+          m_gauge.center.x +
+              cvRound(m_gauge.radius * 0.85 * std::cos(m_scale.startAngle)),
+          m_gauge.center.y +
+              cvRound(m_gauge.radius * 0.85 * std::sin(m_scale.startAngle)));
             cv::line(frame, m_gauge.center, startPt, cv::Scalar(0, 255, 0), 2);
-            cv::putText(frame, std::to_string((int)m_scale.minValue), startPt + cv::Point(10, 0),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
-            cv::Point endPt(
-                m_gauge.center.x + cvRound(m_gauge.radius * 0.85 * std::cos(m_scale.endAngle)),
-                m_gauge.center.y + cvRound(m_gauge.radius * 0.85 * std::sin(m_scale.endAngle)));
+      cv::putText(frame, std::to_string((int)m_scale.minValue),
+                  startPt + cv::Point(10, 0), cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                  cv::Scalar(0, 255, 0), 2);
+      cv::Point endPt(m_gauge.center.x + cvRound(m_gauge.radius * 0.85 *
+                                                 std::cos(m_scale.endAngle)),
+                      m_gauge.center.y + cvRound(m_gauge.radius * 0.85 *
+                                                 std::sin(m_scale.endAngle)));
             cv::line(frame, m_gauge.center, endPt, cv::Scalar(0, 0, 255), 2);
-            cv::putText(frame, std::to_string((int)m_scale.maxValue), endPt + cv::Point(10, 0),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 255), 2);
+      cv::putText(frame, std::to_string((int)m_scale.maxValue),
+                  endPt + cv::Point(10, 0), cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                  cv::Scalar(0, 0, 255), 2);
         }
-        if (needleAngle >= 0) {
-            cv::Point needleTip(
-                m_gauge.center.x + cvRound(m_gauge.radius * 0.8 * std::cos(needleAngle)),
-                m_gauge.center.y + cvRound(m_gauge.radius * 0.8 * std::sin(needleAngle)));
+    if (angle >= 0) {
+      cv::Point needleTip(m_gauge.center.x + cvRound(m_gauge.radius * 0.8 *
+                                                     std::cos(angle)),
+                          m_gauge.center.y + cvRound(m_gauge.radius * 0.8 *
+                                                     std::sin(angle)));
             cv::line(frame, m_gauge.center, needleTip, cv::Scalar(255, 0, 0), 3);
             cv::circle(frame, m_gauge.center, 5, cv::Scalar(255, 0, 0), -1);
         }
     }
     std::ostringstream oss;
     oss << "Value: " << std::fixed << std::setprecision(2) << value;
-    cv::putText(frame, oss.str(), cv::Point(30, 60),
-                cv::FONT_HERSHEY_SIMPLEX, 1.2, cv::Scalar(0, 255, 255), 3);
+  cv::putText(frame, oss.str(), cv::Point(30, 60), cv::FONT_HERSHEY_SIMPLEX,
+              1.2, cv::Scalar(0, 255, 255), 3);
 }
+
+double GaugeDetector::getSmoothedValue() const { return smoothedValue; }
 
 // ═══════════════════════════════════════════════════════════════════
 //  Ring Scan (static)
@@ -280,13 +344,15 @@ std::vector<TickMark> GaugeDetector::scanRingAtRadius(const cv::Mat &frame,
 
     for (int i = 0; i < numAngles; i++) {
         double angle = 2.0 * PI * i / numAngles;
-        double sum = 0; int count = 0;
+    double sum = 0;
+    int count = 0;
         for (int dr = -2; dr <= 2; dr++) {
             double r = scanRadius + dr;
             int x = cvRound(gauge.center.x + r * std::cos(angle));
             int y = cvRound(gauge.center.y + r * std::sin(angle));
             if (x >= 0 && x < gray.cols && y >= 0 && y < gray.rows) {
-                sum += gray.at<uchar>(y, x); count++;
+        sum += gray.at<uchar>(y, x);
+        count++;
             }
         }
         intensity[i] = count > 0 ? sum / count : 255;
@@ -309,14 +375,16 @@ std::vector<TickMark> GaugeDetector::scanRingAtRadius(const cv::Mat &frame,
     int start = -1;
     for (int i = 0; i <= numAngles; i++) {
         bool isMark = (i < numAngles) ? (smoothed[i] < threshold) : false;
-        if (isMark && start == -1) start = i;
+    if (isMark && start == -1)
+      start = i;
         else if (!isMark && start != -1) {
             int end = i - 1;
             if (end - start >= 3) {
                 double centerAngle = 2.0 * PI * (start + end) / (2.0 * numAngles);
                 double width = 2.0 * PI * (end - start + 1) / numAngles;
                 double prominence = 0;
-                for (int j = start; j <= end; j++) prominence += (255.0 - smoothed[j]);
+        for (int j = start; j <= end; j++)
+          prominence += (255.0 - smoothed[j]);
                 prominence /= (end - start + 1);
                 marks.push_back({centerAngle, width, prominence, scanRadius});
             }
@@ -330,28 +398,36 @@ std::vector<TickMark> GaugeDetector::scanRingAtRadius(const cv::Mat &frame,
 //  Even-spacing Refinement (static)
 // ═══════════════════════════════════════════════════════════════════
 
-std::vector<TickMark> GaugeDetector::refineEvenSpacing(const std::vector<TickMark> &marks) {
-    if (marks.size() < 3) return marks;
+std::vector<TickMark>
+GaugeDetector::refineEvenSpacing(const std::vector<TickMark> &marks) {
+  if (marks.size() < 3)
+    return marks;
     std::vector<double> angles;
-    for (const auto &m : marks) angles.push_back(m.angle);
+  for (const auto &m : marks)
+    angles.push_back(m.angle);
     std::sort(angles.begin(), angles.end());
 
     std::vector<double> gaps;
-    for (size_t i = 1; i < angles.size(); i++) gaps.push_back(angles[i] - angles[i - 1]);
+  for (size_t i = 1; i < angles.size(); i++)
+    gaps.push_back(angles[i] - angles[i - 1]);
     gaps.push_back((2.0 * PI - angles.back()) + angles.front());
     double minGap = 1.0 * PI / 180.0;
     gaps.erase(std::remove_if(gaps.begin(), gaps.end(),
-                [&](double g) { return g < minGap; }), gaps.end());
-    if (gaps.empty()) return marks;
+                            [&](double g) { return g < minGap; }),
+             gaps.end());
+  if (gaps.empty())
+    return marks;
 
     std::sort(gaps.begin(), gaps.end());
     double baseSpacing = gaps[gaps.size() / 2];
     int totalMarks = cvRound(2.0 * PI / baseSpacing);
-    if (totalMarks < 3) return marks;
+  if (totalMarks < 3)
+    return marks;
     baseSpacing = 2.0 * PI / totalMarks;
 
     auto angularDist = [](double a, double b) {
-        double d = std::abs(a - b); return std::min(d, 2.0 * PI - d);
+    double d = std::abs(a - b);
+    return std::min(d, 2.0 * PI - d);
     };
 
     int bestCount = 0;
@@ -360,28 +436,38 @@ std::vector<TickMark> GaugeDetector::refineEvenSpacing(const std::vector<TickMar
         int count = 0;
         for (auto a : angles) {
             double residue = std::fmod(angularDist(a, off), baseSpacing);
-            if (residue < baseSpacing * 0.25 || residue > baseSpacing * 0.75) count++;
+      if (residue < baseSpacing * 0.25 || residue > baseSpacing * 0.75)
+        count++;
         }
-        if (count > bestCount) { bestCount = count; bestOffset = off; }
+    if (count > bestCount) {
+      bestCount = count;
+      bestOffset = off;
+    }
     }
 
     double avgProminence = 0;
-    for (const auto &m : marks) avgProminence += m.prominence;
+  for (const auto &m : marks)
+    avgProminence += m.prominence;
     avgProminence /= marks.size();
 
     std::vector<TickMark> refined;
     for (int i = 0; i < totalMarks; i++) {
         double pos = std::fmod(bestOffset + i * baseSpacing, 2.0 * PI);
-        if (pos < 0) pos += 2.0 * PI;
+    if (pos < 0)
+      pos += 2.0 * PI;
         bool matched = false;
         for (const auto &m : marks) {
             if (angularDist(m.angle, pos) < baseSpacing * 0.3) {
-                refined.push_back(m); matched = true; break;
+        refined.push_back(m);
+        matched = true;
+        break;
             }
         }
-        if (!matched) refined.push_back({pos, 0, avgProminence, marks.front().distance});
+    if (!matched)
+      refined.push_back({pos, 0, avgProminence, marks.front().distance});
     }
-    std::sort(refined.begin(), refined.end(),
+  std::sort(
+      refined.begin(), refined.end(),
               [](const TickMark &a, const TickMark &b) { return a.angle < b.angle; });
     return refined;
 }
