@@ -82,19 +82,16 @@ std::vector<GaugeROI> GaugeDetector::findGauges(const cv::Mat &frame,
 
   for (double dp : dpValues) {
     cv::Mat blurred;
-    cv::GaussianBlur(gray, blurred, cv::Size(9, 9), 2, 2);
-    std::vector<cv::Vec3f> circles;
-    cv::HoughCircles(blurred, circles, cv::HOUGH_GRADIENT, dp, gray.rows / 6,
+    cv::GaussianBlur(gray, blurred, cv::Size(9, 9), 2, 2);    
+    cv::HoughCircles(blurred, allCircles, cv::HOUGH_GRADIENT, 1.0, gray.rows / 6,
                      cannyThreshold, accumulatorThreshold, minR, maxR);
-    allCircles.insert(allCircles.end(), circles.begin(), circles.end());
-  }
+                  
+    int max_circles_to_keep = 5; // Set your limit here
 
-//   for (double dp : dpValues) {
-//     std::vector<cv::Vec3f> circles;
-//     cv::HoughCircles(gray, circles, cv::HOUGH_GRADIENT, dp, gray.rows / 6,
-//                      cannyThreshold, accumulatorThreshold, minR, maxR);
-//     allCircles.insert(allCircles.end(), circles.begin(), circles.end());
-//   }
+    if (allCircles.size() > max_circles_to_keep) {
+        allCircles.resize(max_circles_to_keep); // Keep only the best matches
+    }                     
+  }
 
   std::vector<GaugeROI> result;
   for (const auto &c : allCircles) {
@@ -343,7 +340,7 @@ double GaugeDetector::angleToValue(double needleAngle) const {
 
 void GaugeDetector::drawOverlay(cv::Mat &frame, int labelY) const {
   if (m_gauge.radius > 0) {
-    cv::circle(frame, m_gauge.center, m_gauge.radius, cv::Scalar(0, 255, 0), 2);
+    cv::circle(frame, m_gauge.center, m_gauge.radius, m_color, 2);
     if (m_scale.valid) {
       cv::Point startPt(
           m_gauge.center.x +
@@ -369,7 +366,7 @@ void GaugeDetector::drawOverlay(cv::Mat &frame, int labelY) const {
                           m_gauge.center.y + cvRound(m_gauge.radius * 0.8 *
                                                      std::sin(angle)));
       cv::line(frame, m_gauge.center, needleTip, cv::Scalar(255, 0, 0), 3);
-      cv::circle(frame, m_gauge.center, 5, cv::Scalar(255, 0, 0), -1);
+      cv::circle(frame, m_gauge.center, 5, m_color, -1);
     }
   }
   std::ostringstream oss;
@@ -379,6 +376,22 @@ void GaugeDetector::drawOverlay(cv::Mat &frame, int labelY) const {
 }
 
 double GaugeDetector::getSmoothedValue() const { return smoothedValue; }
+
+cv::Scalar GaugeDetector::nextColor() {
+  static const std::vector<cv::Scalar> palette = {
+      {0, 0, 255},     // red
+      {255, 0, 0},     // blue
+      {0, 255, 255},   // yellow
+      {255, 0, 255},   // magenta
+      {255, 255, 0},   // cyan
+      {0, 165, 255},   // orange
+      {128, 0, 128},   // purple
+      {203, 192, 255}, // pink
+      {0, 255, 0},     // green
+  };
+  static size_t idx = 0;
+  return palette[idx++ % palette.size()];
+}
 
 void GaugeDetector::reset() {
   m_gauge = {};

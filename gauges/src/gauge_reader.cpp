@@ -124,7 +124,7 @@ int main(int argc, char **argv) {
     int frameCount = 0;
 
     // Detection tuning parameters
-    int detectCanny = 100;
+    int detectCanny = 320;
     int detectAcc = 40;
     int prevCanny = -1, prevAcc = -1;
     std::vector<GaugeROI> detectedCircles;
@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
                               << g.center.y << "), radius=" << g.radius << "\n";
                     calibFrame = frame.clone();
                     cv::circle(calibFrame, g.center, g.radius,
-                               cv::Scalar(0, 255, 0), 2);
+                               d.color(), 2);
                     d.setState(GaugeState::CALIB_MIN);
                 }
             }
@@ -189,12 +189,19 @@ int main(int argc, char **argv) {
                 prevAcc = detectAcc;
             }
             disp = frame.clone();
-            for (const auto &c : detectedCircles) {
-                cv::circle(disp, c.center, c.radius, cv::Scalar(0, 255, 0), 2);
-                cv::putText(disp, std::to_string(c.radius),
-                            c.center + cv::Point(-20, 5),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                            cv::Scalar(0, 255, 0), 1);
+            {
+                static const std::vector<cv::Scalar> previewPalette = {
+                    {0, 0, 255}, {255, 0, 0}, {0, 255, 255},
+                    {255, 0, 255}, {255, 255, 0}, {0, 165, 255},
+                };
+                for (size_t i = 0; i < detectedCircles.size(); i++) {
+                    const auto &c = detectedCircles[i];
+                    const auto &col = previewPalette[i % previewPalette.size()];
+                    cv::circle(disp, c.center, c.radius, col, 2);
+                    cv::putText(disp, std::to_string(c.radius),
+                                c.center + cv::Point(-20, 5),
+                                cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
+                }
             }
         } else if (allProcessing) {
             disp = frame;
@@ -203,6 +210,8 @@ int main(int argc, char **argv) {
             if (!detectors.empty()) {
                 size_t idx = gauges.empty() ? 0 : currentGaugeIdx;
                 auto &d = detectors[idx];
+                const auto &g = d.gauge();
+                cv::circle(disp, g.center, g.radius, d.color(), 2);
                 if (d.state() == GaugeState::CALIB_MAX) {
                     cv::circle(disp, d.ptMin(), 10, cv::Scalar(0, 255, 255), 2);
                 } else if (d.state() == GaugeState::CALIB_CONFIRM) {
@@ -301,6 +310,7 @@ int main(int argc, char **argv) {
                     for (size_t i = 0; i < detectedCircles.size(); i++) {
                         GaugeDetector d;
                         d.setCircle(detectedCircles[i].center, detectedCircles[i].radius);
+                        d.setColor(GaugeDetector::nextColor());
                         std::cout << "  >> Gauge " << i << " at ("
                                   << detectedCircles[i].center.x << ", "
                                   << detectedCircles[i].center.y << "), radius="
@@ -308,11 +318,6 @@ int main(int argc, char **argv) {
                         detectors.push_back(std::move(d));
                     }
                     calibFrame = frame.clone();
-                    for (const auto &d : detectors) {
-                        const auto &g = d.gauge();
-                        cv::circle(calibFrame, g.center, g.radius,
-                                   cv::Scalar(0, 255, 0), 2);
-                    }
                     detectors[currentGaugeIdx].setState(GaugeState::CALIB_MIN);
                 }
                 ImGui::SameLine();
@@ -321,6 +326,7 @@ int main(int argc, char **argv) {
                 std::cout << "  >> Switching to manual circle placement.\n";
                 std::cout << "  >> Click center, then edge.\n";
                 detectors.emplace_back();
+                detectors[0].setColor(GaugeDetector::nextColor());
                 detectors[0].setState(GaugeState::CIRCLE_MANUAL);
                 detectors[0].setCircleStage(1);
             }
@@ -364,15 +370,6 @@ int main(int argc, char **argv) {
                 ImGui::Text("Min = %d   Max = %d",
                             d.calibTrackMin(), d.calibTrackMax());
                 ImGui::Spacing();
-
-                {
-                    float sa = static_cast<float>(d.scale().startAngle);
-                    float ea = static_cast<float>(d.scale().endAngle);
-                    if (ImGui::InputFloat("Min angle", &sa, 0.01f, 0.1f, "%.3f rad"))
-                        d.setStartAngle(sa);
-                    if (ImGui::InputFloat("Max angle", &ea, 0.01f, 0.1f, "%.3f rad"))
-                        d.setEndAngle(ea);
-                }
 
                 if (ImGui::Button("Confirm", ImVec2(120, 0))) {
                     d.calibrateFromPoints(d.ptMin(), d.ptMax());

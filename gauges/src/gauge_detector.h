@@ -89,6 +89,11 @@ public:
     bool hasGauge() const { return m_gauge.radius > 0; }
     bool hasScale() const { return m_scale.valid; }
 
+    // ─── Color ───────────────────────────────────────────────────────
+    const cv::Scalar &color() const { return m_color; }
+    void setColor(const cv::Scalar &c) { m_color = c; }
+    static cv::Scalar nextColor();
+
     // ─── Ring Scan (static utilities) ──────────────────────────────
     static std::vector<TickMark> scanRingAtRadius(const cv::Mat &frame,
                                                    const GaugeROI &gauge,
@@ -110,6 +115,9 @@ public:
 private:
     GaugeROI m_gauge{};
     ScaleCalibration m_scale{0, 0, 0, 1000, false};
+
+    // Color
+    cv::Scalar m_color{0, 255, 0};
 
     // State machine
     GaugeState m_state = GaugeState::INIT;
