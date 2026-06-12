@@ -117,40 +117,20 @@ int main(int argc, char **argv) {
     // ── App State ──────────────────────────────────────────────────
 
     std::vector<GaugeDetector> detectors;
+    std::vector<GaugeROI> gauges;
     size_t currentGaugeIdx = 0;
     VideoTexture videoTex;
     cv::Mat calibFrame;
     int frameCount = 0;
 
+    // Detection tuning parameters
+    int detectCanny = 100;
+    int detectAcc = 40;
+    int prevCanny = -1, prevAcc = -1;
+    std::vector<GaugeROI> detectedCircles;
+
     // Video writer
     cv::VideoWriter writer;
-
-    // ── Initialization: find all gauges ────────────────────────────
-
-    std::cout << "Detecting gauge circles...\n";
-    std::vector<GaugeROI> gauges = GaugeDetector::findGauges(frame);
-    if (gauges.empty()) {
-        std::cout << "  >> No gauges found. Switching to manual mode.\n";
-        std::cout << "  >> Click center, then edge.\n";
-        detectors.emplace_back();
-        detectors[0].setState(GaugeState::CIRCLE_MANUAL);
-        detectors[0].setCircleStage(1);
-    } else {
-        std::cout << "  >> Found " << gauges.size() << " gauge(s):\n";
-        for (size_t i = 0; i < gauges.size(); i++) {
-            GaugeDetector d;
-            d.setCircle(gauges[i].center, gauges[i].radius);
-            std::cout << "    [" << i << "] at (" << gauges[i].center.x << ", "
-                      << gauges[i].center.y << "), radius=" << gauges[i].radius << "\n";
-            detectors.push_back(std::move(d));
-        }
-        calibFrame = frame.clone();
-        for (const auto &d : detectors) {
-            const auto &g = d.gauge();
-            cv::circle(calibFrame, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
-        }
-        detectors[currentGaugeIdx].setState(GaugeState::CALIB_MIN);
-    }
 
     // ── Main Loop ──────────────────────────────────────────────────
 
@@ -165,23 +145,23 @@ int main(int argc, char **argv) {
         }
 
         // ── State machine transitions ───────────────────────────────
-        // if (!allProcessing && !detectors.empty()) {
-        //     // Manual circle -> calibration transition
-        //     if (gauges.empty()) {
-        //         auto &d = detectors[0];
-        //         if (d.state() == GaugeState::CIRCLE_MANUAL &&
-        //             d.circleStage() == 3 && d.circleRadius() > 0) {
-        //             d.setCircle(d.circleCenter(), d.circleRadius());
-        //             const auto &g = d.gauge();
-        //             std::cout << "  >> Gauge at (" << g.center.x << ", "
-        //                       << g.center.y << "), radius=" << g.radius << "\n";
-        //             calibFrame = frame.clone();
-        //             cv::circle(calibFrame, g.center, g.radius,
-        //                        cv::Scalar(0, 255, 0), 2);
-        //             d.setState(GaugeState::CALIB_MIN);
-        //         }
-        //     }
-        // }
+        if (!allProcessing && !detectors.empty()) {
+            // Manual circle -> calibration transition
+            if (gauges.empty()) {
+                auto &d = detectors[0];
+                if (d.state() == GaugeState::CIRCLE_MANUAL &&
+                    d.circleStage() == 3 && d.circleRadius() > 0) {
+                    d.setCircle(d.circleCenter(), d.circleRadius());
+                    const auto &g = d.gauge();
+                    std::cout << "  >> Gauge at (" << g.center.x << ", "
+                              << g.center.y << "), radius=" << g.radius << "\n";
+                    calibFrame = frame.clone();
+                    cv::circle(calibFrame, g.center, g.radius,
+                               cv::Scalar(0, 255, 0), 2);
+                    d.setState(GaugeState::CALIB_MIN);
+                }
+            }
+        }
 
         // ── Processing work ──────────────────────────────────────────
         if (allProcessing) {
@@ -200,7 +180,23 @@ int main(int argc, char **argv) {
 
         // ── Build display image ──────────────────────────────────────
         cv::Mat disp;
-        if (allProcessing) {
+        if (detectors.empty()) {
+            // ── Detection tuning phase ───────────────────────────────
+            if (detectCanny != prevCanny || detectAcc != prevAcc) {
+                detectedCircles =
+                    GaugeDetector::findGauges(frame, detectCanny, detectAcc);
+                prevCanny = detectCanny;
+                prevAcc = detectAcc;
+            }
+            disp = frame.clone();
+            for (const auto &c : detectedCircles) {
+                cv::circle(disp, c.center, c.radius, cv::Scalar(0, 255, 0), 2);
+                cv::putText(disp, std::to_string(c.radius),
+                            c.center + cv::Point(-20, 5),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.5,
+                            cv::Scalar(0, 255, 0), 1);
+            }
+        } else if (allProcessing) {
             disp = frame;
         } else if (!calibFrame.empty()) {
             disp = calibFrame.clone();
@@ -291,7 +287,45 @@ int main(int argc, char **argv) {
         // ── State UI ─────────────────────────────────────────────────
         ImGui::Spacing();
 
-        if (!allProcessing && !detectors.empty()) {
+        if (detectors.empty()) {
+            // ── Detection tuning UI ─────────────────────────────────
+            ImGui::Text("Adjust thresholds until circles are detected:");
+            ImGui::SliderInt("Canny threshold", &detectCanny, 1, 500);
+            ImGui::SliderInt("Accumulator threshold", &detectAcc, 1, 500);
+            ImGui::Text("Found %zu gauge(s)", detectedCircles.size());
+
+            ImGui::Spacing();
+            if (!detectedCircles.empty()) {
+                if (ImGui::Button("Confirm", ImVec2(120, 0))) {
+                    gauges = detectedCircles;
+                    for (size_t i = 0; i < detectedCircles.size(); i++) {
+                        GaugeDetector d;
+                        d.setCircle(detectedCircles[i].center, detectedCircles[i].radius);
+                        std::cout << "  >> Gauge " << i << " at ("
+                                  << detectedCircles[i].center.x << ", "
+                                  << detectedCircles[i].center.y << "), radius="
+                                  << detectedCircles[i].radius << "\n";
+                        detectors.push_back(std::move(d));
+                    }
+                    calibFrame = frame.clone();
+                    for (const auto &d : detectors) {
+                        const auto &g = d.gauge();
+                        cv::circle(calibFrame, g.center, g.radius,
+                                   cv::Scalar(0, 255, 0), 2);
+                    }
+                    detectors[currentGaugeIdx].setState(GaugeState::CALIB_MIN);
+                }
+                ImGui::SameLine();
+            }
+            if (ImGui::Button("Manual", ImVec2(120, 0))) {
+                std::cout << "  >> Switching to manual circle placement.\n";
+                std::cout << "  >> Click center, then edge.\n";
+                detectors.emplace_back();
+                detectors[0].setState(GaugeState::CIRCLE_MANUAL);
+                detectors[0].setCircleStage(1);
+            }
+        } else if (!allProcessing && !detectors.empty()) {
+            // ── Calibration UI ──────────────────────────────────────
             size_t idx = gauges.empty() ? 0 : currentGaugeIdx;
             auto &d = detectors[idx];
 

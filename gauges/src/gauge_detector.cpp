@@ -67,7 +67,9 @@ void GaugeDetector::setCircle(const cv::Point &center, int radius) {
 //  Static: Find all gauges in frame
 // ═══════════════════════════════════════════════════════════════════
 
-std::vector<GaugeROI> GaugeDetector::findGauges(const cv::Mat &frame) {
+std::vector<GaugeROI> GaugeDetector::findGauges(const cv::Mat &frame,
+                                                int cannyThreshold,
+                                                int accumulatorThreshold) {
   cv::Mat gray;
   cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
@@ -75,42 +77,24 @@ std::vector<GaugeROI> GaugeDetector::findGauges(const cv::Mat &frame) {
   int minR = maxDim / 15;
   int maxR = maxDim / 2;
 
-  struct Params {
-    double dp;
-    int canny;
-    int acc;
-  };
-  std::vector<Params> paramSets = {
-      {1, 80, 40},    {1, 100, 50},  {1, 60, 30},  {1.2, 80, 40},
-      {1.2, 100, 50}, {1.5, 80, 30}, {2, 100, 40},
-  };
-
+  double dpValues[] = {1.0, 1.5};
   std::vector<cv::Vec3f> allCircles;
-  for (const auto &p : paramSets) {
+
+  for (double dp : dpValues) {
     cv::Mat blurred;
     cv::GaussianBlur(gray, blurred, cv::Size(9, 9), 2, 2);
     std::vector<cv::Vec3f> circles;
-    cv::HoughCircles(blurred, circles, cv::HOUGH_GRADIENT, p.dp, gray.rows / 6,
-                     p.canny, p.acc, minR, maxR);
-
-    if (!circles.empty()) {
-      // take the most prominent circle from this param set
-      //allCircles.push_back(circles[0]);
-      allCircles.insert(allCircles.end(), circles.begin(), circles.begin() +std::min(circles.size(), size_t(2)));
-
-      for (auto &c : circles) {
-        std::cout << "  >> Detected circle at (" << cvRound(c[0]) << ", "
-                  << cvRound(c[1]) << "), radius=" << cvRound(c[2])
-                  << " with params (dp=" << p.dp << ", canny=" << p.canny
-                  << ", acc=" << p.acc << ")\n";
-      }
-    //   std::cout << "  >> Detected circle at (" << cvRound(circles[0][0]) << ", "
-    //             << cvRound(circles[0][1]) << "), radius=" << cvRound(circles[0][2])
-    //             << " with params (dp=" << p.dp << ", canny=" << p.canny
-    //             << ", acc=" << p.acc << ")\n";                
-      //break;
-    }    
+    cv::HoughCircles(blurred, circles, cv::HOUGH_GRADIENT, dp, gray.rows / 6,
+                     cannyThreshold, accumulatorThreshold, minR, maxR);
+    allCircles.insert(allCircles.end(), circles.begin(), circles.end());
   }
+
+//   for (double dp : dpValues) {
+//     std::vector<cv::Vec3f> circles;
+//     cv::HoughCircles(gray, circles, cv::HOUGH_GRADIENT, dp, gray.rows / 6,
+//                      cannyThreshold, accumulatorThreshold, minR, maxR);
+//     allCircles.insert(allCircles.end(), circles.begin(), circles.end());
+//   }
 
   std::vector<GaugeROI> result;
   for (const auto &c : allCircles) {

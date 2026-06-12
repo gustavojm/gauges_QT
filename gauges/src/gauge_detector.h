@@ -38,7 +38,9 @@ enum class GaugeState {
 class GaugeDetector {
 public:
     // ─── Static: Find all gauges in a frame ─────────────────────────
-    static std::vector<GaugeROI> findGauges(const cv::Mat &frame);
+    static std::vector<GaugeROI> findGauges(const cv::Mat &frame,
+                                             int cannyThreshold,
+                                             int accumulatorThreshold);
 
     // ─── State Machine ──────────────────────────────────────────────
     GaugeState state() const { return m_state; }
