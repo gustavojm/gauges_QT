@@ -164,11 +164,9 @@ int main(int argc, char **argv) {
 
         // ── Processing work ──────────────────────────────────────────
         if (allProcessing) {
-            for (auto &d : detectors)
-                d.detectNeedle(frame);
-
             int labelY = 60;
             for (auto &d : detectors) {
+                d.detectNeedle(frame);
                 d.drawOverlay(frame, labelY);
                 labelY += 30;
             }
