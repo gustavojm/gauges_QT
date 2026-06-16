@@ -13,6 +13,17 @@
 #include <numeric>
 #include <deque>
 
+constexpr int CIRCLE_THICKNESS = 2;
+constexpr int LABEL_Y_INIT = 60;
+constexpr int LABEL_Y_STEP = 30;
+constexpr int IMAGE_BOTTOM_MARGIN = 70;
+constexpr int BTN_WIDE = 120;
+constexpr int BTN_NARROW = 80;
+constexpr int WINDOW_PAD_W = 100;
+constexpr int WINDOW_PAD_H = 200;
+constexpr int WINDOW_MAX_W = 1600;
+constexpr int WINDOW_MAX_H = 1000;
+
 // ─── GLFW/ImGui Helpers ───────────────────────────────────────────
 
 static void glfw_error_callback(int error, const char *description) {
@@ -101,6 +112,9 @@ static void processTransitions(AppState &app, const cv::Mat &frame) {
 
         case AppMode::Processing:
             break;
+
+        default:
+            break;
     }
 }
 
@@ -125,7 +139,7 @@ static cv::Mat buildDisplayImage(const AppState &app, const cv::Mat &frame) {
             return disp;
         }
         case AppMode::Processing:
-            return frame;
+            return frame.clone();
         case AppMode::Calibration: {
             if (!app.calibFrame.empty()) {
                 cv::Mat disp = app.calibFrame.clone();
@@ -151,8 +165,10 @@ static cv::Mat buildDisplayImage(const AppState &app, const cv::Mat &frame) {
             }
             return disp;
         }
+
+        default:
+            return frame.clone();
     }
-    return frame.clone();
 }
 
 // ─── UI Sections ────────────────────────────────────────────────────
@@ -165,7 +181,7 @@ static void renderDetectionUI(AppState &app, cv::Mat &frame) {
     ImGui::Spacing();
 
     if (!app.detectedGauges.empty()) {
-        if (ImGui::Button("Confirm", ImVec2(120, 0))) {
+        if (ImGui::Button("Confirm", ImVec2(BTN_WIDE, 0))) {
             app.detectors.clear();
             for (size_t i = 0; i < app.detectedGauges.size(); ++i) {
                 app.detectors.emplace_back(app.detectedGauges[i].center,
@@ -183,7 +199,7 @@ static void renderDetectionUI(AppState &app, cv::Mat &frame) {
         ImGui::SameLine();
     }
 
-    if (ImGui::Button("Manual", ImVec2(120, 0))) {
+    if (ImGui::Button("Manual", ImVec2(BTN_WIDE, 0))) {
         std::cout << "  >> Switching to manual circle placement.\n";
         std::cout << "  >> Click center, then edge.\n";
         app.detectors.emplace_back();
@@ -203,13 +219,13 @@ static void renderProcessingUI(AppState &app) {
     }
     ImGui::Spacing();
 
-    if (ImGui::Button("Restart", ImVec2(80, 0))) {
+    if (ImGui::Button("Restart", ImVec2(BTN_NARROW, 0))) {
         app.cap.set(cv::CAP_PROP_POS_FRAMES, 0);
         for (auto &d : app.detectors) d.resetSmoothing();
         app.frameCount = 0;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Quit", ImVec2(80, 0))) {
+    if (ImGui::Button("Quit", ImVec2(BTN_NARROW, 0))) {
         app.quit = true;
     }
 }
@@ -250,8 +266,8 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    int winW = std::min(frame.cols + 100, 1600);
-    int winH = std::min(frame.rows + 200, 1000);
+    int winW = std::min(frame.cols + WINDOW_PAD_W, WINDOW_MAX_W);
+    int winH = std::min(frame.rows + WINDOW_PAD_H, WINDOW_MAX_H);
     GLFWwindow *window = glfwCreateWindow(winW, winH, "Gauge Reader", nullptr, nullptr);
     if (!window) {
         std::cerr << "Error: Could not create GLFW window\n";
@@ -283,11 +299,11 @@ int main(int argc, char **argv) {
 
         // ── Processing work ──────────────────────────────────────────
         if (app.mode == AppMode::Processing) {
-            int labelY = 60;
+            int labelY = LABEL_Y_INIT;
             for (auto &d : app.detectors) {
                 d.detectNeedle(frame);
                 d.drawOverlay(frame, labelY);
-                labelY += 30;
+                labelY += LABEL_Y_STEP;
             }
 
             if (app.writer.isOpened())
@@ -315,7 +331,7 @@ int main(int argc, char **argv) {
 
         // ── Image ────────────────────────────────────────────────────
         float availW = ImGui::GetContentRegionAvail().x;
-        float availH = ImGui::GetContentRegionAvail().y - 70;
+        float availH = ImGui::GetContentRegionAvail().y - IMAGE_BOTTOM_MARGIN;
         float imgW, imgH;
         if (disp.cols * availH > disp.rows * availW) {
             imgW = availW;
@@ -346,16 +362,16 @@ int main(int argc, char **argv) {
             case AppMode::Calibration:
                 if (!app.detectors.empty()) {
                     size_t idx = app.detectedGauges.empty() ? 0 : app.currentGaugeIdx;
-                    auto &d = app.detectors[idx];
-                    if (d.renderCalibrationUI(idx, app.currentGaugeIdx, app.detectors,
-                                              app.detectedGauges.size(), videoPath,
-                                              app.writer, app.fps, frame, app.cap))
+                    if (app.detectors[idx].renderCalibrationUI(idx, app, videoPath, frame))
                         app.quit = true;
                 }
                 break;
 
             case AppMode::Processing:
                 renderProcessingUI(app);
+                break;
+
+            default:
                 break;
         }
 

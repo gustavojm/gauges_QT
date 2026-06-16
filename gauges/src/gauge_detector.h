@@ -1,8 +1,9 @@
 #pragma once
 
 #include <opencv2/opencv.hpp>
-#include <vector>
 #include <deque>
+
+struct AppState;
 
 struct GaugeROI {
     cv::Point center;
@@ -15,13 +16,6 @@ struct ScaleCalibration {
     double minValue;
     double maxValue;
     bool valid;
-};
-
-struct TickMark {
-    double angle;
-    double angularWidth;
-    double prominence;
-    double distance;
 };
 
 inline constexpr double PI = 3.14159265358979323846;
@@ -66,8 +60,7 @@ public:
     int calibTrackMax() const { return m_calibTrackMax; }
     void setCalibTrackMax(int v) { m_calibTrackMax = v; }
 
-    // ─── Circle Detection ───────────────────────────────────────────
-    bool detectCircle(const cv::Mat &frame);
+    // ─── Circle ─────────────────────────────────────────────────────
     void setCircle(const cv::Point &center, int radius);
 
     // ─── Needle Detection ───────────────────────────────────────────
@@ -77,8 +70,6 @@ public:
     void calibrateFromPoints(const cv::Point &ptMin, const cv::Point &ptMax);
     void setCalibrationValues(double minVal, double maxVal);
     void setCalibrationValid(bool valid);
-    void setStartAngle(double a);
-    void setEndAngle(double a);
 
     // ─── Value Mapping ──────────────────────────────────────────────
     double angleToValue(double needleAngle) const;
@@ -89,20 +80,11 @@ public:
     // ─── State Access ───────────────────────────────────────────────
     const GaugeROI &gauge() const { return m_gauge; }
     const ScaleCalibration &scale() const { return m_scale; }
-    bool hasGauge() const { return m_gauge.radius > 0; }
-    bool hasScale() const { return m_scale.valid; }
 
     // ─── Color ───────────────────────────────────────────────────────
     const cv::Scalar &color() const { return m_color; }
     void setColor(const cv::Scalar &c) { m_color = c; }
     static cv::Scalar nextColor();
-
-    // ─── Ring Scan (static utilities) ──────────────────────────────
-    static std::vector<TickMark> scanRingAtRadius(const cv::Mat &frame,
-                                                   const GaugeROI &gauge,
-                                                   double scanRadius,
-                                                   int numAngles = 720);
-    static std::vector<TickMark> refineEvenSpacing(const std::vector<TickMark> &marks);
 
     // ─── Smoothing ──────────────────────────────────────────────────
     double smoothReadings(double value);
@@ -111,9 +93,6 @@ public:
         valueHistory.clear();
         smoothedValue = 0;
     }
-
-    // ─── Reset ──────────────────────────────────────────────────────
-    void reset();
 
     // Handle a click coming from the UI while in manual / calibration modes.
     // Behavior matches previous inline code in gauge_reader.cpp:
@@ -125,17 +104,9 @@ public:
 
     // Render the calibration UI for this detector.
     // Returns true if the user pressed "Cancel" (request to exit main loop).
-    // This method may modify currentGaugeIdx and the detectors vector (advance next,
-    // mark all detectors PROCESSING and open writer via the references passed).
-    bool renderCalibrationUI(size_t idx,
-                             size_t &currentGaugeIdx,
-                             std::vector<GaugeDetector> &detectors,
-                             size_t detectedGaugesCount,
+    bool renderCalibrationUI(size_t idx, AppState &app,
                              const std::string &videoPath,
-                             cv::VideoWriter &writer,
-                             double fps,
-                             cv::Mat &frame,
-                             cv::VideoCapture &cap);
+                             cv::Mat &frame);
 
 private:
     GaugeROI m_gauge{};
