@@ -11,7 +11,10 @@ enum class WorkerCommand {
     kNone,
     kConfirmGauges,
     kStartManual,
+    kAddManualGauge,
+    kConfirmManualCircles,
     kConfirmCalib,
+    kConfirmAndAddManual,
     kCancel,
     kRestart,
 };

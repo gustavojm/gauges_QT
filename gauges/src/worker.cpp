@@ -44,12 +44,23 @@ static cv::Mat BuildCalibrationDisplay(const cv::Mat& firstFrame,
         }
     } else {
         disp = firstFrame.clone();
-        if (!detectors.empty()) {
-            const auto& d = detectors[0];
-            if (d.state() == GaugeState::kCircleManual &&
-                d.circle_stage() == 2) {
-                cv::circle(disp, d.circle_center(), 5, cv::Scalar(0, 255, 0), -1);
-                cv::circle(disp, d.circle_center(), 30, cv::Scalar(0, 255, 0), 1);
+    }
+
+    // During circle placement, show all placed gauges
+    if (!detectors.empty()) {
+        const auto& cur = detectors[currentGaugeIdx];
+        if (cur.state() == GaugeState::kCircleManual) {
+            for (const auto& det : detectors) {
+                if (det.gauge().radius > 0) {
+                    cv::circle(disp, det.gauge().center, det.gauge().radius,
+                               det.color(), 2);
+                }
+            }
+            if (cur.circle_stage() == 2) {
+                cv::circle(disp, cur.circle_center(), 5,
+                           cv::Scalar(0, 255, 0), -1);
+                cv::circle(disp, cur.circle_center(), 30,
+                           cv::Scalar(0, 255, 0), 1);
             }
         }
     }
@@ -95,7 +106,7 @@ void WorkerMain(const std::string& videoPath, SharedState& shared) {
             shared.calibUI.initialized = false;
             return;
         }
-        size_t idx = detectedGauges.empty() ? 0 : currentGaugeIdx;
+        size_t idx = currentGaugeIdx;
         const auto& d = detectors[idx];
         shared.calibUI.initialized = true;
         shared.calibUI.state = d.state();
@@ -165,60 +176,99 @@ void WorkerMain(const std::string& videoPath, SharedState& shared) {
                         detectors.emplace_back(
                             g.center, g.radius,
                             GaugeDetector::NextColor());
+                        detectors.back().set_state(GaugeState::kCircleManual);
+                        detectors.back().set_circle_stage(3);
                         std::cout << "  >> Gauge " << (detectors.size() - 1)
                                   << " at (" << g.center.x << ", " << g.center.y
                                   << "), radius=" << g.radius << "\n";
                     }
+                    detectedGauges.clear();
                     calibFrame = firstFrame.clone();
-                    for (auto& d : detectors) {
-                        cv::circle(calibFrame, d.gauge().center,
-                                   d.gauge().radius, d.color(), 2);
-                    }
                     currentGaugeIdx = 0;
                 } else if (cmd == WorkerCommand::kStartManual) {
                     detectors.clear();
+                    detectedGauges.clear();
                     detectors.emplace_back();
                     detectors[0].set_color(GaugeDetector::NextColor());
                     detectors[0].set_state(GaugeState::kCircleManual);
                     detectors[0].set_circle_stage(1);
                     std::cout << "  >> Manual circle placement.\n";
                     std::cout << "  >> Click center, then edge.\n";
+                } else if (cmd == WorkerCommand::kConfirmAndAddManual) {
+                    detectors.clear();
+                    for (auto& g : detectedGauges) {
+                        detectors.emplace_back(
+                            g.center, g.radius,
+                            GaugeDetector::NextColor());
+                        detectors.back().set_state(GaugeState::kCircleManual);
+                        detectors.back().set_circle_stage(3);
+                        std::cout << "  >> Gauge " << (detectors.size() - 1)
+                                  << " at (" << g.center.x << ", " << g.center.y
+                                  << "), radius=" << g.radius << "\n";
+                    }
+                    detectedGauges.clear();
+                    detectors.emplace_back();
+                    detectors.back().set_color(GaugeDetector::NextColor());
+                    detectors.back().set_state(GaugeState::kCircleManual);
+                    detectors.back().set_circle_stage(1);
+                    currentGaugeIdx = detectors.size() - 1;
+                    calibFrame = firstFrame.clone();
+                    std::cout << "  >> Confirmed " << (detectors.size() - 1)
+                              << " auto gauges, placing manual gauge "
+                              << currentGaugeIdx << "\n";
+                } else if (cmd == WorkerCommand::kAddManualGauge) {
+                    detectors.emplace_back();
+                    detectors.back().set_color(GaugeDetector::NextColor());
+                    detectors.back().set_state(GaugeState::kCircleManual);
+                    detectors.back().set_circle_stage(1);
+                    currentGaugeIdx = detectors.size() - 1;
+                    std::cout << "  >> Add manual gauge " << currentGaugeIdx
+                              << "\n";
+                } else if (cmd == WorkerCommand::kConfirmManualCircles &&
+                           !detectors.empty()) {
+                    calibFrame = firstFrame.clone();
+                    currentGaugeIdx = 0;
+                    detectors[0].set_state(GaugeState::kCalibMin);
+                    std::cout << "  >> Starting calibration for "
+                              << detectors.size() << " gauge(s)\n";
                 }
 
                 // Handle click
                 if (hasClick && !detectors.empty()) {
-                    size_t idx = detectedGauges.empty() ? 0 : currentGaugeIdx;
-                    detectors[idx].HandleClick(clickX, clickY);
+                    detectors[currentGaugeIdx].HandleClick(clickX, clickY);
                 }
 
-                // Auto-transition: manual circle stage 3 → CALIB_MIN
+                // Store manual circle geometry when stage 3 is reached
                 if (detectedGauges.empty() && !detectors.empty()) {
-                    auto& d = detectors[0];
+                    auto& d = detectors[currentGaugeIdx];
                     if (d.state() == GaugeState::kCircleManual &&
-                        d.circle_stage() == 3 && d.circle_radius() > 0) {
+                        d.circle_stage() == 3 && d.circle_radius() > 0 &&
+                        d.gauge().radius == 0) {
                         d.SetCircle(d.circle_center(), d.circle_radius());
                         const auto& g = d.gauge();
-                        std::cout << "  >> Gauge at (" << g.center.x << ", "
+                        std::cout << "  >> Gauge " << currentGaugeIdx
+                                  << " at (" << g.center.x << ", "
                                   << g.center.y << "), radius=" << g.radius
                                   << "\n";
                         calibFrame = firstFrame.clone();
-                        cv::circle(calibFrame, g.center, g.radius, d.color(),
-                                   2);
-                        d.set_state(GaugeState::kCalibMin);
+                        for (const auto& det : detectors) {
+                            if (det.gauge().radius > 0) {
+                                cv::circle(calibFrame, det.gauge().center,
+                                           det.gauge().radius, det.color(), 2);
+                            }
+                        }
                     }
                 }
 
                 // Handle calibration confirmation command
                 if (cmd == WorkerCommand::kConfirmCalib && !detectors.empty()) {
-                    size_t idx =
-                        detectedGauges.empty() ? 0 : currentGaugeIdx;
-                    auto& d = detectors[idx];
+                    auto& d = detectors[currentGaugeIdx];
                     d.CalibrateFromPoints(d.pt_min(), d.pt_max());
                     d.SetCalibrationValues(calMin, calMax);
                     d.SetCalibrationValid(true);
 
                     const auto& s = d.scale();
-                    std::cout << "  >> Gauge " << idx
+                    std::cout << "  >> Gauge " << currentGaugeIdx
                               << " scale: " << s.min_value << " at "
                               << (s.start_angle * 180.0 / kPi) << " deg, "
                               << s.max_value << " at "

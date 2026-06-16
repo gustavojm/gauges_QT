@@ -106,20 +106,27 @@ static void RenderDetectionUI(SharedState& shared, const UIState& ui) {
         shared.runDetection = true;
     }
 
-    if (!ui.detectedGauges.empty()) {
-        if (ImGui::Button("Confirm", ImVec2(kBtnWide, 0))) {
-            std::lock_guard<std::mutex> lk(shared.mtx);
-            shared.command = WorkerCommand::kConfirmGauges;
-            shared.mode = AppMode::kCalibration;
-        }
-        ImGui::SameLine();
-    }
-
     if (ImGui::Button("Manual", ImVec2(kBtnWide, 0))) {
         std::lock_guard<std::mutex> lk(shared.mtx);
         shared.command = WorkerCommand::kStartManual;
         shared.mode = AppMode::kCalibration;
     }
+    ImGui::SameLine();
+
+    if (!ui.detectedGauges.empty()) {
+        if (ImGui::Button("Add Manually", ImVec2(kBtnWide, 0))) {
+            std::lock_guard<std::mutex> lk(shared.mtx);
+            shared.command = WorkerCommand::kConfirmAndAddManual;
+            shared.mode = AppMode::kCalibration;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Confirm", ImVec2(kBtnWide, 0))) {
+            std::lock_guard<std::mutex> lk(shared.mtx);
+            shared.command = WorkerCommand::kConfirmGauges;
+            shared.mode = AppMode::kCalibration;
+        }
+    }
+
 }
 
 static void RenderCalibrationUI(SharedState& shared, const UIState& ui) {
@@ -131,9 +138,23 @@ static void RenderCalibrationUI(SharedState& shared, const UIState& ui) {
         if (cal.circleStage == 1)
             ImGui::TextColored(ImVec4(1, 1, 0, 1),
                                "Click on the CENTER of the gauge");
-        else
+        else if (cal.circleStage == 2)
             ImGui::TextColored(ImVec4(1, 1, 0, 1),
                                "Now click on the EDGE of the gauge face");
+        else if (cal.circleStage == 3) {
+            ImGui::TextColored(ImVec4(0, 1, 0, 1),
+                               "Gauge %zu placed", cal.totalGauges);
+            ImGui::Spacing();
+            if (ImGui::Button("Add another gauge", ImVec2(kBtnWide, 0))) {
+                std::lock_guard<std::mutex> lk(shared.mtx);
+                shared.command = WorkerCommand::kAddManualGauge;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Start calibration", ImVec2(kBtnWide, 0))) {
+                std::lock_guard<std::mutex> lk(shared.mtx);
+                shared.command = WorkerCommand::kConfirmManualCircles;
+            }
+        }
     }
 
     if (cal.state == GaugeState::kCalibMin) {
