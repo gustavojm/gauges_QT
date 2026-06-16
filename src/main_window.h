@@ -31,10 +31,14 @@ public:
 
 signals:
     void imageClicked(int imageX, int imageY);
+    void mouseMoved(int imageX, int imageY);
+    void mouseReleased();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 
 private:
@@ -70,9 +74,7 @@ private slots:
     void onManualPlacementToggled(bool checked);
     void onCannyChanged(int value);
     void onAccChanged(int value);
-    void onAddManual();
     void onConfirmGauges();
-    void onAddAnotherGauge();
     void onStartCalibration();
     void onConfirmCalib();
     void onCancelCalib();
@@ -99,19 +101,19 @@ private:
     // Detection
     QWidget* detectionPage_;
     QCheckBox* manualCb_;
+    QWidget* cannyRow_;
     QSlider* cannySlider_;
     QLabel* cannyValLabel_;
+    QWidget* accRow_;
     QSlider* accSlider_;
     QLabel* accValLabel_;
     QLabel* gaugeCountLabel_;
-    QPushButton* addManualBtn_;
     QPushButton* confirmBtn_;
 
     // Calibration
     QWidget* calibrationPage_;
     QLabel* calibInstruction_;
     QLabel* gaugeProgress_;
-    QPushButton* addAnotherBtn_;
     QPushButton* startCalibBtn_;
     QWidget* calibConfirmWidget_;
     QSpinBox* minValSpin_;

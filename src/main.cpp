@@ -36,7 +36,7 @@ VideoWidget::VideoWidget(QWidget* parent)
     : QWidget(parent)
 {
     setMinimumSize(320, 240);
-    setMouseTracking(false);
+    setMouseTracking(true);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 }
 
@@ -69,16 +69,34 @@ void VideoWidget::resizeEvent(QResizeEvent*) {
     updateScaled();
 }
 
+static bool widgetToImage(const QImage& image, const QPixmap& scaled,
+                          int w, int h, const QPoint& pos,
+                          int& ix, int& iy) {
+    if (image.isNull() || scaled.isNull()) return false;
+    float sx = static_cast<float>(scaled.width()) / image.width();
+    float sy = static_cast<float>(scaled.height()) / image.height();
+    int ox = (w - scaled.width()) / 2;
+    int oy = (h - scaled.height()) / 2;
+    ix = static_cast<int>((pos.x() - ox) / sx);
+    iy = static_cast<int>((pos.y() - oy) / sy);
+    return ix >= 0 && ix < image.width() && iy >= 0 && iy < image.height();
+}
+
 void VideoWidget::mousePressEvent(QMouseEvent* event) {
-    if (image_.isNull() || scaled_.isNull()) return;
-    float sx = static_cast<float>(scaled_.width()) / image_.width();
-    float sy = static_cast<float>(scaled_.height()) / image_.height();
-    int ox = (width() - scaled_.width()) / 2;
-    int oy = (height() - scaled_.height()) / 2;
-    int ix = static_cast<int>((event->pos().x() - ox) / sx);
-    int iy = static_cast<int>((event->pos().y() - oy) / sy);
-    if (ix >= 0 && ix < image_.width() && iy >= 0 && iy < image_.height())
+    int ix, iy;
+    if (widgetToImage(image_, scaled_, width(), height(), event->pos(), ix, iy))
         emit imageClicked(ix, iy);
+}
+
+void VideoWidget::mouseMoveEvent(QMouseEvent* event) {
+    if (!(event->buttons() & Qt::LeftButton)) return;
+    int ix, iy;
+    if (widgetToImage(image_, scaled_, width(), height(), event->pos(), ix, iy))
+        emit mouseMoved(ix, iy);
+}
+
+void VideoWidget::mouseReleaseEvent(QMouseEvent*) {
+    emit mouseReleased();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -91,7 +109,8 @@ MainWindow::MainWindow(const std::string& videoPath)
     resize(1600, 1000);
     setStyleSheet("QWidget { font-size: 13px; }"
                   "QWidget#controlPanel { background-color: #1e1e24; }"
-                  "QLabel { color: #d0d0d0; }");
+                  "QLabel { color: #d0d0d0; }"
+                  "QCheckBox { color: #d0d0d0; }");
 
     auto* mainLayout = new QHBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -138,6 +157,19 @@ MainWindow::MainWindow(const std::string& videoPath)
             this, &MainWindow::onModeChanged);
     connect(worker_, &Worker::finished,
             this, &MainWindow::onWorkerFinished);
+
+    // ── Manual placement button text ──────────────────────────────────
+    connect(worker_, &Worker::manualPlacementActive, this,
+            [this](bool active) {
+        cannyRow_->setVisible(!active);
+        accRow_->setVisible(!active);
+    });
+
+    // ── Drag markers (cross-thread, auto-queued) ────────────────────
+    connect(videoWidget_, &VideoWidget::mouseMoved,
+            worker_, &Worker::handleDragMove);
+    connect(videoWidget_, &VideoWidget::mouseReleased,
+            worker_, &Worker::handleDragRelease);
 
     connect(workerThread_, &QThread::started,
             worker_, &Worker::start);
@@ -186,13 +218,13 @@ void MainWindow::buildDetectionUI(QVBoxLayout* parent) {
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(10);
 
-    manualCb_ = new QCheckBox("Manual placement", this);
+    manualCb_ = new QCheckBox("Click to place gauges manually", this);
     connect(manualCb_, &QCheckBox::toggled,
             this, &MainWindow::onManualPlacementToggled);
     lay->addWidget(manualCb_);
 
-    auto* cannyRow = new QWidget(this);
-    auto* chl = new QHBoxLayout(cannyRow);
+    cannyRow_ = new QWidget(this);
+    auto* chl = new QHBoxLayout(cannyRow_);
     chl->setContentsMargins(0, 0, 0, 0);
     chl->addWidget(new QLabel("Canny:", this));
     cannySlider_ = new QSlider(Qt::Horizontal, this);
@@ -204,10 +236,10 @@ void MainWindow::buildDetectionUI(QVBoxLayout* parent) {
     chl->addWidget(cannyValLabel_);
     connect(cannySlider_, &QSlider::valueChanged,
             this, &MainWindow::onCannyChanged);
-    lay->addWidget(cannyRow);
+    lay->addWidget(cannyRow_);
 
-    auto* accRow = new QWidget(this);
-    auto* ahl = new QHBoxLayout(accRow);
+    accRow_ = new QWidget(this);
+    auto* ahl = new QHBoxLayout(accRow_);
     ahl->setContentsMargins(0, 0, 0, 0);
     ahl->addWidget(new QLabel("Accum:", this));
     accSlider_ = new QSlider(Qt::Horizontal, this);
@@ -219,7 +251,7 @@ void MainWindow::buildDetectionUI(QVBoxLayout* parent) {
     ahl->addWidget(accValLabel_);
     connect(accSlider_, &QSlider::valueChanged,
             this, &MainWindow::onAccChanged);
-    lay->addWidget(accRow);
+    lay->addWidget(accRow_);
 
     gaugeCountLabel_ = new QLabel("Found 0 gauge(s)", this);
     lay->addWidget(gaugeCountLabel_);
@@ -230,14 +262,9 @@ void MainWindow::buildDetectionUI(QVBoxLayout* parent) {
     auto* bhl = new QHBoxLayout(btnRow);
     bhl->setContentsMargins(0, 0, 0, 0);
     bhl->setSpacing(8);
-    addManualBtn_ = new QPushButton("Add Manually", this);
-    addManualBtn_->setFixedWidth(kBtnWide);
     confirmBtn_ = new QPushButton("Confirm", this);
     confirmBtn_->setFixedWidth(kBtnWide);
-    bhl->addWidget(addManualBtn_);
     bhl->addWidget(confirmBtn_);
-    connect(addManualBtn_, &QPushButton::clicked,
-            this, &MainWindow::onAddManual);
     connect(confirmBtn_, &QPushButton::clicked,
             this, &MainWindow::onConfirmGauges);
     lay->addWidget(btnRow);
@@ -259,12 +286,6 @@ void MainWindow::buildCalibrationUI(QVBoxLayout* parent) {
     calibInstruction_->setWordWrap(true);
     calibInstruction_->setStyleSheet("color: #ffff00; font-weight: bold;");
     lay->addWidget(calibInstruction_);
-
-    addAnotherBtn_ = new QPushButton("Add another gauge", this);
-    addAnotherBtn_->setFixedWidth(kBtnWide);
-    connect(addAnotherBtn_, &QPushButton::clicked,
-            this, &MainWindow::onAddAnotherGauge);
-    lay->addWidget(addAnotherBtn_);
 
     startCalibBtn_ = new QPushButton("Start calibration", this);
     startCalibBtn_->setFixedWidth(kBtnWide);
@@ -323,7 +344,6 @@ void MainWindow::buildCalibrationUI(QVBoxLayout* parent) {
 
     // Default hidden state
     calibrationPage_->setVisible(false);
-    addAnotherBtn_->setVisible(false);
     startCalibBtn_->setVisible(false);
     calibConfirmWidget_->setVisible(false);
 
@@ -402,7 +422,6 @@ void MainWindow::onDetectionUpdated(size_t numGauges) {
     gaugeCountLabel_->setText(
         QString("Found %1 gauge(s)").arg(numGauges));
     bool hasGauges = numGauges > 0;
-    addManualBtn_->setVisible(hasGauges);
     confirmBtn_->setVisible(hasGauges);
 }
 
@@ -412,9 +431,7 @@ void MainWindow::onCalibUIUpdated(const CalibUIState& calib) {
         return;
     }
 
-    bool showAddAnother = false;
-    bool showStartCalib = false;
-    bool showConfirm = false;
+    bool showCalibrating = false;
 
     switch (calib.state) {
     case GaugeState::kCircleManual:
@@ -424,15 +441,12 @@ void MainWindow::onCalibUIUpdated(const CalibUIState& calib) {
         else if (calib.circleStage == 2)
             calibInstruction_->setText(
                 "Now click on the EDGE of the gauge face");
-        else if (calib.circleStage == 3) {
+        else if (calib.circleStage == 3)
             calibInstruction_->setText(
                 QString("Gauge %1 placed").arg(calib.totalGauges));
-            showAddAnother = true;
-            showStartCalib = true;
-        }
         break;
 
-    case GaugeState::kCalibMin:
+    case GaugeState::kCalibrating:
         if (calib.totalGauges > 1)
             gaugeProgress_->setText(
                 QString("Gauge %1 / %2")
@@ -441,25 +455,9 @@ void MainWindow::onCalibUIUpdated(const CalibUIState& calib) {
         else
             gaugeProgress_->clear();
         calibInstruction_->setText(
-            "Click on the MINIMUM value marking");
-        break;
-
-    case GaugeState::kCalibMax:
-        calibInstruction_->setText(
-            "Now click on the MAXIMUM value marking");
-        break;
-
-    case GaugeState::kCalibConfirm:
-        if (calib.totalGauges > 1)
-            gaugeProgress_->setText(
-                QString("Gauge %1 / %2")
-                    .arg(calib.currentGauge + 1)
-                    .arg(calib.totalGauges));
-        else
-            gaugeProgress_->clear();
-        calibInstruction_->setText(
-            "Set min/max values and confirm");
-        showConfirm = true;
+            "Drag markers to set min/max positions,\n"
+            "adjust values, then confirm");
+        showCalibrating = true;
 
         if (!calibConfirmInitialized_) {
             minValSpin_->setValue(calib.calibTrackMin);
@@ -472,11 +470,10 @@ void MainWindow::onCalibUIUpdated(const CalibUIState& calib) {
         break;
     }
 
-    addAnotherBtn_->setVisible(showAddAnother);
-    startCalibBtn_->setVisible(showStartCalib);
-    calibConfirmWidget_->setVisible(showConfirm);
+    startCalibBtn_->setVisible(false);
+    calibConfirmWidget_->setVisible(showCalibrating);
 
-    if (calib.state != GaugeState::kCalibConfirm)
+    if (calib.state != GaugeState::kCalibrating)
         calibConfirmInitialized_ = false;
 }
 
@@ -524,18 +521,10 @@ void MainWindow::onAccChanged(int value) {
         Qt::QueuedConnection, Q_ARG(int, value));
 }
 
-void MainWindow::onAddManual() {
-    setMode(AppMode::kCalibration);
-    QMetaObject::invokeMethod(worker_, "addManual", Qt::QueuedConnection);
-}
 
 void MainWindow::onConfirmGauges() {
     setMode(AppMode::kCalibration);
     QMetaObject::invokeMethod(worker_, "confirmGauges", Qt::QueuedConnection);
-}
-
-void MainWindow::onAddAnotherGauge() {
-    QMetaObject::invokeMethod(worker_, "addAnotherGauge", Qt::QueuedConnection);
 }
 
 void MainWindow::onStartCalibration() {

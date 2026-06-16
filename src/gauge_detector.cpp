@@ -344,16 +344,6 @@ void GaugeDetector::HandleClick(int clickX, int clickY) {
             std::cout << "  >> Radius set to " << r << "\n";
             set_circle_stage(3);
         }
-    } else if (state() == GaugeState::kCalibMin) {
-        set_pt_min(cv::Point(clickX, clickY));
-        std::cout << "  >> Min marking at (" << clickX << ", " << clickY
-                  << ")\n";
-        set_state(GaugeState::kCalibMax);
-    } else if (state() == GaugeState::kCalibMax) {
-        set_pt_max(cv::Point(clickX, clickY));
-        std::cout << "  >> Max marking at (" << clickX << ", " << clickY
-                  << ")\n";
-        set_state(GaugeState::kCalibConfirm);
     }
 }
 
@@ -361,5 +351,35 @@ GaugeDetector::GaugeDetector(const cv::Point& center, int radius,
                              const cv::Scalar& color) {
     gauge_ = {center, radius};
     set_color(color);
-    set_state(GaugeState::kCalibMin);
+    set_state(GaugeState::kCalibrating);
+    // Default markers at 135° (top-right) and 45° (top-left)
+    double a = 3.0 * kPi / 4.0;
+    pt_min_ = center + cv::Point(cvRound(radius * std::cos(a)),
+                                 cvRound(radius * std::sin(a)));
+    a = kPi / 4.0;
+    pt_max_ = center + cv::Point(cvRound(radius * std::cos(a)),
+                                 cvRound(radius * std::sin(a)));
+}
+
+int GaugeDetector::HitTestMarker(cv::Point click, int radius) const {
+    int threshold = std::max(radius / 6, 12);
+    int dmin = cvRound(cv::norm(click - pt_min_));
+    int dmax = cvRound(cv::norm(click - pt_max_));
+    if (dmin <= threshold && dmin <= dmax) return kMarkerMin;
+    if (dmax <= threshold) return kMarkerMax;
+    return kMarkerNone;
+}
+
+void GaugeDetector::MoveMarkerToPerimeter(int which, cv::Point click,
+                                          cv::Point center, int radius) {
+    cv::Point vec = click - center;
+    double dist = cv::norm(vec);
+    if (dist < 1.0) return;
+    double scale = static_cast<double>(radius) / dist;
+    cv::Point onCircle = center + cv::Point(cvRound(vec.x * scale),
+                                             cvRound(vec.y * scale));
+    if (which == kMarkerMin)
+        pt_min_ = onCircle;
+    else if (which == kMarkerMax)
+        pt_max_ = onCircle;
 }

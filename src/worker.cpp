@@ -126,6 +126,7 @@ void Worker::setManualPlacement(bool enabled) {
     manualPlacement_ = enabled;
     if (!enabled && mode_ == AppMode::kDetection)
         reRunDetection();
+    emit manualPlacementActive(enabled);
 }
 
 void Worker::setCanny(int value) {
@@ -171,23 +172,40 @@ void Worker::handleClick(int x, int y) {
         emit detectionUpdated(detectedGauges_.size());
 
     } else if (mode_ == AppMode::kCalibration && !detectors_.empty()) {
-        detectors_[currentGaugeIdx_].HandleClick(x, y);
-
         auto& d = detectors_[currentGaugeIdx_];
-        if (d.state() == GaugeState::kCircleManual &&
-            d.circle_stage() == 3 && d.circle_radius() > 0 &&
-            d.gauge().radius == 0) {
-            d.SetCircle(d.circle_center(), d.circle_radius());
-            const auto& g = d.gauge();
-            std::cout << "  >> Gauge " << currentGaugeIdx_
-                      << " at (" << g.center.x << ", " << g.center.y
-                      << "), radius=" << g.radius << "\n";
-            calibFrame_ = firstFrame_.clone();
-            for (const auto& det : detectors_) {
-                if (det.gauge().radius > 0) {
-                    cv::circle(calibFrame_, det.gauge().center,
-                               det.gauge().radius, det.color(), 2);
-                }
+        if (d.state() == GaugeState::kCircleManual) {
+            d.HandleClick(x, y);
+            if (d.circle_stage() == 3 && d.circle_radius() > 0 &&
+                d.gauge().radius == 0) {
+                d.SetCircle(d.circle_center(), d.circle_radius());
+                const auto& g = d.gauge();
+                std::cout << "  >> Gauge " << currentGaugeIdx_
+                          << " at (" << g.center.x << ", " << g.center.y
+                          << "), radius=" << g.radius << "\n";
+                calibFrame_ = firstFrame_.clone();
+                // Auto-advance to calibrating with default markers
+                double a = 3.0 * kPi / 4.0;
+                d.set_pt_min(d.gauge().center + cv::Point(
+                    cvRound(d.gauge().radius * std::cos(a)),
+                    cvRound(d.gauge().radius * std::sin(a))));
+                a = kPi / 4.0;
+                d.set_pt_max(d.gauge().center + cv::Point(
+                    cvRound(d.gauge().radius * std::cos(a)),
+                    cvRound(d.gauge().radius * std::sin(a))));
+                d.set_state(GaugeState::kCalibrating);
+                // Reset to first uncalibrated gauge for sequential calibration
+                size_t first = 0;
+                while (first < detectors_.size() && detectors_[first].scale().valid)
+                    first++;
+                if (first < detectors_.size())
+                    currentGaugeIdx_ = first;
+            }
+        } else if (d.state() == GaugeState::kCalibrating) {
+            int hit = d.HitTestMarker(cv::Point(x, y), d.gauge().radius);
+            if (hit != GaugeDetector::kMarkerNone) {
+                draggingMarker_ = hit;
+                d.MoveMarkerToPerimeter(hit, cv::Point(x, y),
+                                        d.gauge().center, d.gauge().radius);
             }
         }
 
@@ -204,34 +222,59 @@ void Worker::publishCalibrationDisplay() {
     cv::Mat disp;
     if (!calibFrame_.empty()) {
         disp = calibFrame_.clone();
-        if (!detectors_.empty()) {
-            const auto& d = detectors_[currentGaugeIdx_];
-            cv::circle(disp, d.gauge().center, d.gauge().radius, d.color(), 2);
-            if (d.state() == GaugeState::kCalibMax) {
-                cv::circle(disp, d.pt_min(), 10, cv::Scalar(0, 255, 255), 2);
-            } else if (d.state() == GaugeState::kCalibConfirm) {
-                cv::circle(disp, d.pt_min(), 10, cv::Scalar(0, 255, 0), 2);
-                cv::circle(disp, d.pt_max(), 10, cv::Scalar(0, 0, 255), 2);
-            }
-        }
     } else {
         disp = firstFrame_.clone();
     }
 
-    if (!detectors_.empty()) {
-        const auto& cur = detectors_[currentGaugeIdx_];
-        if (cur.state() == GaugeState::kCircleManual) {
-            if (cur.gauge().radius > 0) {
-                cv::circle(disp, cur.gauge().center,
-                           cur.gauge().radius, cur.color(), 2);
-            }
-            if (cur.circle_stage() == 2) {
-                cv::circle(disp, cur.circle_center(), 5,
-                           cv::Scalar(0, 255, 0), -1);
-                cv::circle(disp, cur.circle_center(), 30,
-                           cv::Scalar(0, 255, 0), 1);
-            }
+    if (detectors_.empty()) {
+        emit frameReady(matToQImage(disp));
+        return;
+    }
+
+    const auto& cur = detectors_[currentGaugeIdx_];
+
+    // Draw gauge circle if valid
+    if (cur.gauge().radius > 0) {
+        cv::circle(disp, cur.gauge().center, cur.gauge().radius, cur.color(), 2);
+    }
+
+    // Circle manual placement
+    if (cur.state() == GaugeState::kCircleManual) {
+        if (cur.circle_stage() == 2) {
+            cv::circle(disp, cur.circle_center(), 5,
+                       cv::Scalar(0, 255, 0), -1);
+            cv::circle(disp, cur.circle_center(), 30,
+                       cv::Scalar(0, 255, 0), 1);
         }
+        emit frameReady(matToQImage(disp));
+        return;
+    }
+
+    // Calibrating: draw both markers always
+    if (cur.state() == GaugeState::kCalibrating) {
+        cv::circle(disp, cur.gauge().center, 4, cv::Scalar(255, 255, 255), -1);
+
+        // Arc from min to max
+        cv::Point vecMin = cur.pt_min() - cur.gauge().center;
+        cv::Point vecMax = cur.pt_max() - cur.gauge().center;
+        double angleMin = std::atan2(vecMin.y, vecMin.x);
+        double angleMax = std::atan2(vecMax.y, vecMax.x);
+        cv::ellipse(disp, cur.gauge().center,
+                    cv::Size(cur.gauge().radius, cur.gauge().radius),
+                    0, angleMin * 180.0 / kPi, angleMax * 180.0 / kPi,
+                    cv::Scalar(0, 255, 255), 2);
+
+        // Min marker (green)
+        cv::circle(disp, cur.pt_min(), 10, cv::Scalar(0, 255, 0), -1);
+        cv::circle(disp, cur.pt_min(), 14, cv::Scalar(0, 255, 0), 2);
+        cv::putText(disp, "min", cur.pt_min() + cv::Point(12, 4),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+
+        // Max marker (red)
+        cv::circle(disp, cur.pt_max(), 10, cv::Scalar(0, 0, 255), -1);
+        cv::circle(disp, cur.pt_max(), 14, cv::Scalar(0, 0, 255), 2);
+        cv::putText(disp, "max", cur.pt_max() + cv::Point(12, 4),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
     }
 
     emit frameReady(matToQImage(disp));
@@ -248,7 +291,17 @@ void Worker::startCalibration() {
     if (mode_ != AppMode::kCalibration || detectors_.empty()) return;
     currentGaugeIdx_ = 0;
     calibFrame_ = firstFrame_.clone();
-    detectors_[0].set_state(GaugeState::kCalibMin);
+    auto& d = detectors_[0];
+    d.set_state(GaugeState::kCalibrating);
+    // Init marker defaults if not already set
+    if (d.gauge().radius > 0 && d.pt_min() == cv::Point() && d.pt_max() == cv::Point()) {
+        double a = 3.0 * kPi / 4.0;
+        d.set_pt_min(d.gauge().center + cv::Point(cvRound(d.gauge().radius * std::cos(a)),
+                                                   cvRound(d.gauge().radius * std::sin(a))));
+        a = kPi / 4.0;
+        d.set_pt_max(d.gauge().center + cv::Point(cvRound(d.gauge().radius * std::cos(a)),
+                                                   cvRound(d.gauge().radius * std::sin(a))));
+    }
     std::cout << "  >> Starting calibration for "
               << detectors_.size() << " gauge(s)\n";
     publishCalibrationDisplay();
@@ -262,8 +315,6 @@ void Worker::confirmGauges() {
     detectors_.clear();
     for (auto& g : detectedGauges_) {
         detectors_.emplace_back(g.center, g.radius, GaugeDetector::NextColor());
-        detectors_.back().set_state(GaugeState::kCircleManual);
-        detectors_.back().set_circle_stage(3);
         std::cout << "  >> Gauge " << (detectors_.size() - 1)
                   << " at (" << g.center.x << ", " << g.center.y
                   << "), radius=" << g.radius << "\n";
@@ -277,63 +328,52 @@ void Worker::confirmGauges() {
 void Worker::addManual() {
     if (mode_ != AppMode::kDetection) return;
 
-    if (!detectedGauges_.empty()) {
-        detectors_.clear();
-        for (auto& g : detectedGauges_) {
-            detectors_.emplace_back(g.center, g.radius,
-                                    GaugeDetector::NextColor());
-            detectors_.back().set_state(GaugeState::kCircleManual);
-            detectors_.back().set_circle_stage(3);
-            std::cout << "  >> Gauge " << (detectors_.size() - 1)
-                      << " at (" << g.center.x << ", " << g.center.y
-                      << "), radius=" << g.radius << "\n";
-        }
-        detectedGauges_.clear();
+    if (manualPlacement_) {
+        // Toggle off — exit placement mode, show current gauges
+        manualPlacement_ = false;
+        manualPending_ = false;
+        std::cout << "  >> Manual placement stopped\n";
+    } else {
+        manualPlacement_ = true;
+        manualPending_ = false;
+        std::cout << "  >> Click center then edge to place manual gauge\n";
     }
-
-    detectors_.emplace_back();
-    detectors_.back().set_color(GaugeDetector::NextColor());
-    detectors_.back().set_state(GaugeState::kCircleManual);
-    detectors_.back().set_circle_stage(1);
-    currentGaugeIdx_ = detectors_.size() - 1;
-    calibFrame_ = firstFrame_.clone();
-    std::cout << "  >> Add manual gauge " << currentGaugeIdx_ << "\n";
-    enterCalibration();
-}
-
-void Worker::addAnotherGauge() {
-    if (mode_ != AppMode::kCalibration) return;
-
-    detectors_.emplace_back();
-    detectors_.back().set_color(GaugeDetector::NextColor());
-    detectors_.back().set_state(GaugeState::kCircleManual);
-    detectors_.back().set_circle_stage(1);
-    currentGaugeIdx_ = detectors_.size() - 1;
-    std::cout << "  >> Add manual gauge " << currentGaugeIdx_ << "\n";
-
-    publishCalibrationDisplay();
-    emit calibUIUpdated(computeCalibUI());
+    emit manualPlacementActive(manualPlacement_);
 }
 
 void Worker::confirmCalib() {
     if (mode_ != AppMode::kCalibration || detectors_.empty()) return;
 
-    auto& d = detectors_[currentGaugeIdx_];
+    // Calibrate the first gauge that hasn't been calibrated yet
+    size_t idx = 0;
+    while (idx < detectors_.size() && detectors_[idx].scale().valid)
+        idx++;
+    if (idx >= detectors_.size()) {
+        enterProcessing();
+        return;
+    }
+
+    auto& d = detectors_[idx];
     d.CalibrateFromPoints(d.pt_min(), d.pt_max());
     d.SetCalibrationValues(calibMinVal_, calibMaxVal_);
     d.SetCalibrationValid(true);
 
     const auto& s = d.scale();
-    std::cout << "  >> Gauge " << currentGaugeIdx_
+    std::cout << "  >> Gauge " << idx
               << " scale: " << s.min_value << " at "
               << (s.start_angle * 180.0 / kPi) << " deg, "
               << s.max_value << " at "
               << (s.end_angle * 180.0 / kPi) << " deg\n";
 
-    if (currentGaugeIdx_ + 1 < detectors_.size()) {
-        currentGaugeIdx_++;
+    // Advance to the next uncalibrated gauge
+    size_t next = idx + 1;
+    while (next < detectors_.size() && detectors_[next].scale().valid)
+        next++;
+
+    if (next < detectors_.size()) {
+        currentGaugeIdx_ = next;
         calibFrame_ = firstFrame_.clone();
-        detectors_[currentGaugeIdx_].set_state(GaugeState::kCalibMin);
+        detectors_[next].set_state(GaugeState::kCalibrating);
         publishCalibrationDisplay();
         emit calibUIUpdated(computeCalibUI());
     } else {
@@ -410,6 +450,27 @@ void Worker::restart() {
     for (auto& d : detectors_) d.ResetSmoothing();
     frameCount_ = 0;
     QTimer::singleShot(0, this, &Worker::processNextFrame);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Drag Handlers
+// ═══════════════════════════════════════════════════════════════════
+
+void Worker::handleDragMove(int x, int y) {
+    if (draggingMarker_ == GaugeDetector::kMarkerNone) return;
+    if (mode_ != AppMode::kCalibration || detectors_.empty()) return;
+    if (currentGaugeIdx_ >= detectors_.size()) return;
+
+    auto& d = detectors_[currentGaugeIdx_];
+    if (d.state() != GaugeState::kCalibrating) return;
+
+    d.MoveMarkerToPerimeter(draggingMarker_, cv::Point(x, y),
+                            d.gauge().center, d.gauge().radius);
+    publishCalibrationDisplay();
+}
+
+void Worker::handleDragRelease() {
+    draggingMarker_ = GaugeDetector::kMarkerNone;
 }
 
 // ═══════════════════════════════════════════════════════════════════

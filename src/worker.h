@@ -26,6 +26,7 @@ signals:
     void detectionUpdated(size_t numGauges);
     void calibUIUpdated(const CalibUIState& state);
     void modeChanged(AppMode mode);
+    void manualPlacementActive(bool active);
     void finished();
 
 public slots:
@@ -36,11 +37,12 @@ public slots:
     void setAcc(int value);
     void confirmGauges();
     void addManual();
-    void addAnotherGauge();
     void confirmCalib();
     void setCalibMin(int value);
     void setCalibMax(int value);
     void startCalibration();
+    void handleDragMove(int x, int y);
+    void handleDragRelease();
     void restart();
     void quit();
 
@@ -80,6 +82,7 @@ private:
 
     AppMode mode_ = AppMode::kDetection;
     bool quit_ = false;
+    int draggingMarker_ = GaugeDetector::kMarkerNone;
 
     QTimer* processTimer_ = nullptr;
 };

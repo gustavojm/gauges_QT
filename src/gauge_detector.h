@@ -23,9 +23,7 @@ inline constexpr double kPi = 3.14159265358979323846;
 enum class GaugeState {
     kInit,
     kCircleManual,
-    kCalibMin,
-    kCalibMax,
-    kCalibConfirm,
+    kCalibrating,
     kProcessing
 };
 
@@ -94,12 +92,19 @@ public:
         smoothed_value_ = 0;
     }
 
+    // ─── Drag / Hit-test for marker calibration ───────────────────────
+    static constexpr int kMarkerNone = -1;
+    static constexpr int kMarkerMin  = 0;
+    static constexpr int kMarkerMax  = 1;
+
+    // Returns kMarkerMin if click is near pt_min_, kMarkerMax if near pt_max_,
+    // or kMarkerNone otherwise.  (threshold = radius/6)
+    int HitTestMarker(cv::Point click, int radius) const;
+
+    // Project click onto the circle perimeter and store in pt_min_ / pt_max_.
+    void MoveMarkerToPerimeter(int which, cv::Point click, cv::Point center, int radius);
+
     // Handle a click coming from the UI while in manual / calibration modes.
-    // Behavior matches previous inline code in gauge_reader.cpp:
-    //  - CIRCLE_MANUAL stage 1 -> set center, advance to stage 2
-    //  - CIRCLE_MANUAL stage 2 -> set radius, advance to stage 3
-    //  - CALIB_MIN -> set pt_min, advance to CALIB_MAX
-    //  - CALIB_MAX -> set pt_max, advance to CALIB_CONFIRM
     void HandleClick(int clickX, int clickY);
 
 private:
