@@ -48,6 +48,7 @@ struct SharedState {
     int detectCanny = 320;
     int detectAcc = 40;
     bool runDetection = true;
+    bool manualPlacement = false;
 
     WorkerCommand command = WorkerCommand::kNone;
 

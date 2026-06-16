@@ -99,6 +99,8 @@ void WorkerMain(const std::string& videoPath, SharedState& shared) {
     size_t currentGaugeIdx = 0;
     int prevCanny = -1, prevAcc = -1;
     int frameCount = 0;
+    bool manualPending = false;
+    cv::Point manualCenter;
     cv::VideoWriter writer;
 
     auto publishCalibUI = [&](std::lock_guard<std::mutex>&) {
@@ -152,14 +154,47 @@ void WorkerMain(const std::string& videoPath, SharedState& shared) {
         switch (mode) {
             // ═══════ Detection ══════════════════════════════════
             case AppMode::kDetection: {
-                if (doDetection || canny != prevCanny ||
-                    acc != prevAcc) {
-                    detectedGauges = GaugeDetector::FindGauges(
-                        firstFrame, canny, acc);
-                    prevCanny = canny;
-                    prevAcc = acc;
+                bool manualMode;
+                {
+                    std::lock_guard<std::mutex> lk(shared.mtx);
+                    manualMode = shared.manualPlacement;
                 }
-                disp = BuildDetectionDisplay(firstFrame, detectedGauges);
+                if (manualMode) {
+                    if (hasClick) {
+                        if (!manualPending) {
+                            manualCenter = cv::Point(clickX, clickY);
+                            manualPending = true;
+                        } else {
+                            int r = cvRound(
+                                cv::norm(cv::Point(clickX, clickY) -
+                                         manualCenter));
+                            detectedGauges.push_back({manualCenter, r});
+                            std::cout << "  >> Manual gauge at ("
+                                      << manualCenter.x << ", "
+                                      << manualCenter.y
+                                      << "), radius=" << r << "\n";
+                            manualPending = false;
+                        }
+                    }
+                    disp = firstFrame.clone();
+                    for (const auto& g : detectedGauges) {
+                        cv::circle(disp, g.center, g.radius,
+                                   cv::Scalar(0, 255, 0), 2);
+                    }
+                    if (manualPending) {
+                        cv::circle(disp, manualCenter, 5,
+                                   cv::Scalar(0, 255, 255), -1);
+                    }
+                } else {
+                    if (doDetection || canny != prevCanny ||
+                        acc != prevAcc) {
+                        detectedGauges = GaugeDetector::FindGauges(
+                            firstFrame, canny, acc);
+                        prevCanny = canny;
+                        prevAcc = acc;
+                    }
+                    disp = BuildDetectionDisplay(firstFrame, detectedGauges);
+                }
 
                 std::lock_guard<std::mutex> lk(shared.mtx);
                 disp.copyTo(shared.displayFrame);

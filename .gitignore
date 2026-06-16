@@ -1,34 +1,6 @@
-Debug/*
+build/
 
-[Bb]uild/*
-[Dd]ocs/*
-CMakeCache.*
-CMakeFiles/*
-[Tt]esting/*
+# Clangd
+.cache
 
-*/[Bb]uild/*
-
-### VisualStudioCode ###
-#.vscode/*
-#.vscode/settings.json
-#.vscode/tasks.json
-#.vscode/launch.json
-#.vscode/extensions.json
-
-### VisualStudioCode Patch ###
-# Ignore all local history of files
-.history
-
-# Build results
-[Dd]ebug/
-[Dd]ebugPublic/
-[Rr]elease/
-[Rr]eleases/
-x64/
-x86/
-[Aa][Rr][Mm]/
-[Aa][Rr][Mm]64/
-bld/
-[Bb]in/
-[Oo]bj/
-[Ll]og/
+resources/
