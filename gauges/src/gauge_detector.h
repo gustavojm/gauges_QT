@@ -3,8 +3,6 @@
 #include <deque>
 #include <opencv2/opencv.hpp>
 
-struct AppState;
-
 struct GaugeROI {
     cv::Point center;
     int radius;
@@ -101,11 +99,6 @@ public:
     //  - CALIB_MIN -> set pt_min, advance to CALIB_MAX
     //  - CALIB_MAX -> set pt_max, advance to CALIB_CONFIRM
     void HandleClick(int clickX, int clickY);
-
-    // Render the calibration UI for this detector.
-    // Returns true if the user pressed "Cancel" (request to exit main loop).
-    bool RenderCalibrationUI(size_t idx, AppState& app,
-                             const std::string& videoPath, cv::Mat& frame);
 
 private:
     GaugeROI gauge_{};

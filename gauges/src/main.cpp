@@ -2,30 +2,22 @@
 
 #include <algorithm>
 #include <cmath>
-#include <deque>
-#include <iomanip>
 #include <iostream>
-#include <numeric>
-#include <opencv2/opencv.hpp>
 #include <string>
+#include <thread>
 
 #include "app_state.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include "shared_state.h"
+#include "worker.h"
 
-constexpr int kCircleThickness = 2;
-constexpr int kLabelYInit = 60;
-constexpr int kLabelYStep = 30;
-constexpr int kImageBottomMargin = 70;
+constexpr int kImageBottomMargin = 90;
 constexpr int kBtnWide = 120;
 constexpr int kBtnNarrow = 80;
-constexpr int kWindowPadW = 100;
-constexpr int kWindowPadH = 200;
-constexpr int kWindowMaxW = 1600;
-constexpr int kWindowMaxH = 1000;
 
-// ─── GLFW/ImGui Helpers ───────────────────────────────────────────
+// ─── GLFW Helper ─────────────────────────────────────────────────
 
 static void GlfwErrorCallback(int error, const char* description) {
     std::cerr << "GLFW Error " << error << ": " << description << "\n";
@@ -78,175 +70,133 @@ static bool TryGetClickOnImage(int& outX, int& outY, int imageW, int imageH) {
     return false;
 }
 
-// ─── Application Logic ─────────────────────────────────────────────
+// ─── Local UI state snapshot ─────────────────────────────────────
 
-static void ProcessTransitions(AppState& app, const cv::Mat& frame) {
-    switch (app.mode) {
-        case AppMode::kDetection:
-            if (app.detectCanny != app.prevCanny ||
-                app.detectAcc != app.prevAcc) {
-                app.detectedGauges = GaugeDetector::FindGauges(
-                    frame, app.detectCanny, app.detectAcc);
-                app.prevCanny = app.detectCanny;
-                app.prevAcc = app.detectAcc;
-            }
-            break;
+struct UIState {
+    AppMode mode = AppMode::kDetection;
+    std::vector<double> gaugeValues;
+    std::vector<GaugeROI> detectedGauges;
+    int frameCount = 0;
+    int totalFrames = 0;
+    CalibUIState calib;
+};
 
-        case AppMode::kCalibration: {
-            // Manual circle → CALIB_MIN transition
-            if (app.detectedGauges.empty() && !app.detectors.empty()) {
-                auto& d = app.detectors[0];
-                if (d.state() == GaugeState::kCircleManual &&
-                    d.circle_stage() == 3 && d.circle_radius() > 0) {
-                    d.SetCircle(d.circle_center(), d.circle_radius());
-                    const auto& g = d.gauge();
-                    std::cout << "  >> Gauge at (" << g.center.x << ", "
-                              << g.center.y << "), radius=" << g.radius << "\n";
-                    app.calibFrame = frame.clone();
-                    cv::circle(app.calibFrame, g.center, g.radius, d.color(),
-                               2);
-                    d.set_state(GaugeState::kCalibMin);
-                }
-            }
-            // All detectors done calibrating → enter Processing mode
-            if (!app.detectors.empty()) {
-                bool allDone = true;
-                for (const auto& det : app.detectors)
-                    if (det.state() != GaugeState::kProcessing) {
-                        allDone = false;
-                        break;
-                    }
-                if (allDone) app.mode = AppMode::kProcessing;
-            }
-            break;
-        }
+// ─── UI Sections ─────────────────────────────────────────────────
 
-        case AppMode::kProcessing:
-            break;
-
-        default:
-            break;
+static void RenderDetectionUI(SharedState& shared, const UIState& ui) {
+    int canny = 0, acc = 0;
+    {
+        std::lock_guard<std::mutex> lk(shared.mtx);
+        canny = shared.detectCanny;
+        acc = shared.detectAcc;
     }
-}
 
-// ─── Display ────────────────────────────────────────────────────────
-
-static cv::Mat BuildDisplayImage(const AppState& app, const cv::Mat& frame) {
-    switch (app.mode) {
-        case AppMode::kDetection: {
-            cv::Mat disp = frame.clone();
-            static const std::vector<cv::Scalar> previewPalette = {
-                {0, 0, 255},   {255, 0, 0},   {0, 255, 255},
-                {255, 0, 255}, {255, 255, 0}, {0, 165, 255},
-            };
-            for (size_t i = 0; i < app.detectedGauges.size(); i++) {
-                const auto& c = app.detectedGauges[i];
-                const auto& col = previewPalette[i % previewPalette.size()];
-                cv::circle(disp, c.center, c.radius, col, 2);
-                cv::putText(disp, std::to_string(c.radius),
-                            c.center + cv::Point(-20, 5),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
-            }
-            return disp;
-        }
-        case AppMode::kProcessing:
-            return frame.clone();
-        case AppMode::kCalibration: {
-            if (!app.calibFrame.empty()) {
-                cv::Mat disp = app.calibFrame.clone();
-                size_t idx =
-                    app.detectedGauges.empty() ? 0 : app.currentGaugeIdx;
-                const auto& d = app.detectors[idx];
-                const auto& g = d.gauge();
-                cv::circle(disp, g.center, g.radius, d.color(), 2);
-                if (d.state() == GaugeState::kCalibMax) {
-                    cv::circle(disp, d.pt_min(), 10, cv::Scalar(0, 255, 255),
-                               2);
-                } else if (d.state() == GaugeState::kCalibConfirm) {
-                    cv::circle(disp, d.pt_min(), 10, cv::Scalar(0, 255, 0), 2);
-                    cv::circle(disp, d.pt_max(), 10, cv::Scalar(0, 0, 255), 2);
-                }
-                return disp;
-            }
-            cv::Mat disp = frame.clone();
-            if (!app.detectors.empty()) {
-                const auto& d = app.detectors[0];
-                if (d.state() == GaugeState::kCircleManual &&
-                    d.circle_stage() == 2) {
-                    cv::circle(disp, d.circle_center(), 5,
-                               cv::Scalar(0, 255, 0), -1);
-                    cv::circle(disp, d.circle_center(), 30,
-                               cv::Scalar(0, 255, 0), 1);
-                }
-            }
-            return disp;
-        }
-
-        default:
-            return frame.clone();
-    }
-}
-
-// ─── UI Sections ────────────────────────────────────────────────────
-
-static void RenderDetectionUI(AppState& app, cv::Mat& frame) {
+    bool changed = false;
     ImGui::Text("Adjust thresholds until circles are detected:");
-    ImGui::SliderInt("Canny threshold", &app.detectCanny, 1, 500);
-    ImGui::SliderInt("Accumulator threshold", &app.detectAcc, 1, 500);
-    ImGui::Text("Found %zu gauge(s)", app.detectedGauges.size());
+    if (ImGui::SliderInt("Canny threshold", &canny, 1, 500)) changed = true;
+    if (ImGui::SliderInt("Accumulator threshold", &acc, 1, 500))
+        changed = true;
+    ImGui::Text("Found %zu gauge(s)", ui.detectedGauges.size());
     ImGui::Spacing();
 
-    if (!app.detectedGauges.empty()) {
+    if (changed) {
+        std::lock_guard<std::mutex> lk(shared.mtx);
+        shared.detectCanny = canny;
+        shared.detectAcc = acc;
+        shared.runDetection = true;
+    }
+
+    if (!ui.detectedGauges.empty()) {
         if (ImGui::Button("Confirm", ImVec2(kBtnWide, 0))) {
-            app.detectors.clear();
-            for (size_t i = 0; i < app.detectedGauges.size(); ++i) {
-                app.detectors.emplace_back(app.detectedGauges[i].center,
-                                           app.detectedGauges[i].radius,
-                                           GaugeDetector::NextColor());
-                std::cout << "  >> Gauge " << i << " at ("
-                          << app.detectedGauges[i].center.x << ", "
-                          << app.detectedGauges[i].center.y
-                          << "), radius=" << app.detectedGauges[i].radius
-                          << "\n";
-            }
-            app.calibFrame = frame.clone();
-            app.currentGaugeIdx = 0;
-            app.mode = AppMode::kCalibration;
+            std::lock_guard<std::mutex> lk(shared.mtx);
+            shared.command = WorkerCommand::kConfirmGauges;
+            shared.mode = AppMode::kCalibration;
         }
         ImGui::SameLine();
     }
 
     if (ImGui::Button("Manual", ImVec2(kBtnWide, 0))) {
-        std::cout << "  >> Switching to manual circle placement.\n";
-        std::cout << "  >> Click center, then edge.\n";
-        app.detectors.emplace_back();
-        app.detectors[0].set_color(GaugeDetector::NextColor());
-        app.detectors[0].set_state(GaugeState::kCircleManual);
-        app.detectors[0].set_circle_stage(1);
-        app.mode = AppMode::kCalibration;
+        std::lock_guard<std::mutex> lk(shared.mtx);
+        shared.command = WorkerCommand::kStartManual;
+        shared.mode = AppMode::kCalibration;
     }
 }
 
-static void RenderProcessingUI(AppState& app) {
-    ImGui::Text("Frame %d / %d", app.frameCount, app.totalFrames);
-    for (size_t i = 0; i < app.detectors.size(); i++) {
+static void RenderCalibrationUI(SharedState& shared, const UIState& ui) {
+    if (!ui.calib.initialized) return;
+
+    const auto& cal = ui.calib;
+
+    if (cal.state == GaugeState::kCircleManual) {
+        if (cal.circleStage == 1)
+            ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                               "Click on the CENTER of the gauge");
+        else
+            ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                               "Now click on the EDGE of the gauge face");
+    }
+
+    if (cal.state == GaugeState::kCalibMin) {
+        if (cal.totalGauges > 1)
+            ImGui::Text("Gauge %zu / %zu", cal.currentGauge + 1,
+                        cal.totalGauges);
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                           "Click on the MINIMUM value marking");
+    }
+
+    if (cal.state == GaugeState::kCalibMax) {
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                           "Now click on the MAXIMUM value marking");
+    }
+
+    if (cal.state == GaugeState::kCalibConfirm) {
+        if (cal.totalGauges > 1)
+            ImGui::Text("Gauge %zu / %zu", cal.currentGauge + 1,
+                        cal.totalGauges);
+
+        int minVal = cal.calibTrackMin;
+        int maxVal = cal.calibTrackMax;
+        if (ImGui::SliderInt("Min value", &minVal, 0, 1000) ||
+            ImGui::SliderInt("Max value", &maxVal, 0, 1000)) {
+            std::lock_guard<std::mutex> lk(shared.mtx);
+            shared.calibMinVal = minVal;
+            shared.calibMaxVal = maxVal;
+        }
+        ImGui::Text("Min = %d   Max = %d", minVal, maxVal);
+        ImGui::Spacing();
+
+        if (ImGui::Button("Confirm", ImVec2(kBtnWide, 0))) {
+            std::lock_guard<std::mutex> lk(shared.mtx);
+            shared.command = WorkerCommand::kConfirmCalib;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(kBtnWide, 0))) {
+            std::lock_guard<std::mutex> lk(shared.mtx);
+            shared.quit = true;
+        }
+    }
+}
+
+static void RenderProcessingUI(SharedState& shared, const UIState& ui) {
+    ImGui::Text("Frame %d / %d", ui.frameCount, ui.totalFrames);
+    for (size_t i = 0; i < ui.gaugeValues.size(); i++) {
         ImGui::TextColored(ImVec4(0, 1, 1, 1), "Gauge %zu: %.2f", i + 1,
-                           app.detectors[i].GetSmoothedValue());
+                           ui.gaugeValues[i]);
     }
     ImGui::Spacing();
 
     if (ImGui::Button("Restart", ImVec2(kBtnNarrow, 0))) {
-        app.cap.set(cv::CAP_PROP_POS_FRAMES, 0);
-        for (auto& d : app.detectors) d.ResetSmoothing();
-        app.frameCount = 0;
+        std::lock_guard<std::mutex> lk(shared.mtx);
+        shared.command = WorkerCommand::kRestart;
     }
     ImGui::SameLine();
     if (ImGui::Button("Quit", ImVec2(kBtnNarrow, 0))) {
-        app.quit = true;
+        std::lock_guard<std::mutex> lk(shared.mtx);
+        shared.quit = true;
     }
 }
 
-// ─── Main ─────────────────────────────────────────────────────────
+// ─── Main ────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -256,26 +206,7 @@ int main(int argc, char** argv) {
 
     std::string videoPath = argv[1];
 
-    AppState app;
-    app.cap.open(videoPath);
-    if (!app.cap.isOpened()) {
-        std::cerr << "Error: Could not open video: " << videoPath << "\n";
-        return -1;
-    }
-
-    app.fps = app.cap.get(cv::CAP_PROP_FPS);
-    app.totalFrames = static_cast<int>(app.cap.get(cv::CAP_PROP_FRAME_COUNT));
-    std::cout << "Video: " << videoPath << "\n";
-    std::cout << "FPS: " << app.fps << ", Total frames: " << app.totalFrames
-              << "\n";
-
-    cv::Mat frame;
-    if (!app.cap.read(frame)) {
-        std::cerr << "Error: Could not read first frame\n";
-        return -1;
-    }
-
-    // ── Init GLFW + ImGui ──────────────────────────────────────────
+    // ── Init GLFW + ImGui ──────────────────────────────────────
 
     glfwSetErrorCallback(GlfwErrorCallback);
     if (!glfwInit()) {
@@ -283,10 +214,8 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    int winW = std::min(frame.cols + kWindowPadW, kWindowMaxW);
-    int winH = std::min(frame.rows + kWindowPadH, kWindowMaxH);
     GLFWwindow* window =
-        glfwCreateWindow(winW, winH, "Gauge Reader", nullptr, nullptr);
+        glfwCreateWindow(1600, 1000, "Gauge Reader", nullptr, nullptr);
     if (!window) {
         std::cerr << "Error: Could not create GLFW window\n";
         glfwTerminate();
@@ -302,38 +231,38 @@ int main(int argc, char** argv) {
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 130");
 
+    // ── Start worker thread ────────────────────────────────────
+
+    SharedState shared;
+    std::thread worker(WorkerMain, videoPath, std::ref(shared));
+
     VideoTexture videoTex;
+    cv::Mat displayFrame;
+    UIState ui;
 
-    // ── Main Loop ──────────────────────────────────────────────────
+    // ── Main Loop ──────────────────────────────────────────────
 
-    while (!glfwWindowShouldClose(window) && !app.quit) {
-        // ── Frame acquisition (processing mode only) ────────────────
-        if (app.mode == AppMode::kProcessing) {
-            if (!app.cap.read(frame)) break;
-        }
-
-        // ── State transitions ───────────────────────────────────────
-        ProcessTransitions(app, frame);
-
-        // ── Processing work ──────────────────────────────────────────
-        if (app.mode == AppMode::kProcessing) {
-            int labelY = kLabelYInit;
-            for (auto& d : app.detectors) {
-                d.DetectNeedle(frame);
-                d.DrawOverlay(frame, labelY);
-                labelY += kLabelYStep;
+    while (!glfwWindowShouldClose(window)) {
+        // ── Snapshot latest results from worker ─────────────────
+        {
+            std::lock_guard<std::mutex> lk(shared.mtx);
+            if (shared.quit) break;
+            if (shared.frameReady) {
+                shared.displayFrame.copyTo(displayFrame);
+                shared.frameReady = false;
             }
-
-            if (app.writer.isOpened()) app.writer.write(frame);
+            ui.mode = shared.mode;
+            ui.gaugeValues = shared.gaugeValues;
+            ui.detectedGauges = shared.detectedGauges;
+            ui.frameCount = shared.frameCount;
+            ui.totalFrames = shared.totalFrames;
+            ui.calib = shared.calibUI;
         }
 
-        // ── Build display image ──────────────────────────────────────
-        cv::Mat disp = BuildDisplayImage(app, frame);
+        // ── Upload texture ─────────────────────────────────────
+        if (!displayFrame.empty()) videoTex.update(displayFrame);
 
-        // ── Upload texture ───────────────────────────────────────────
-        videoTex.update(disp);
-
-        // ── ImGui Frame ──────────────────────────────────────────────
+        // ── ImGui Frame ────────────────────────────────────────
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -345,60 +274,54 @@ int main(int argc, char** argv) {
                          ImGuiWindowFlags_NoMove |
                          ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-        // ── Image ────────────────────────────────────────────────────
-        float availW = ImGui::GetContentRegionAvail().x;
-        float availH = ImGui::GetContentRegionAvail().y - kImageBottomMargin;
-        float imgW, imgH;
-        if (disp.cols * availH > disp.rows * availW) {
-            imgW = availW;
-            imgH = availW * disp.rows / disp.cols;
-        } else {
-            imgH = availH;
-            imgW = availH * disp.cols / disp.rows;
-        }
-        ImGui::Image((ImTextureID)(intptr_t)videoTex.id, ImVec2(imgW, imgH));
-
-        // ── Handle clicks ────────────────────────────────────────────
-        int clickX = -1, clickY = -1;
-        if (TryGetClickOnImage(clickX, clickY, disp.cols, disp.rows)) {
-            if (!app.detectors.empty()) {
-                size_t idx =
-                    app.detectedGauges.empty() ? 0 : app.currentGaugeIdx;
-                app.detectors[idx].HandleClick(clickX, clickY);
+        // ── Image ──────────────────────────────────────────────
+        if (!displayFrame.empty()) {
+            float availW = ImGui::GetContentRegionAvail().x;
+            float availH =
+                ImGui::GetContentRegionAvail().y - kImageBottomMargin;
+            float imgW, imgH;
+            if (displayFrame.cols * availH > displayFrame.rows * availW) {
+                imgW = availW;
+                imgH = availW * displayFrame.rows / displayFrame.cols;
+            } else {
+                imgH = availH;
+                imgW = availH * displayFrame.cols / displayFrame.rows;
             }
+            ImGui::Image((ImTextureID)(intptr_t)videoTex.id,
+                         ImVec2(imgW, imgH));
         }
 
-        // ── Mode-specific UI ─────────────────────────────────────────
+        // ── Handle clicks ──────────────────────────────────────
+        int clickX = -1, clickY = -1;
+        if (!displayFrame.empty() &&
+            TryGetClickOnImage(clickX, clickY, displayFrame.cols,
+                               displayFrame.rows)) {
+            std::lock_guard<std::mutex> lk(shared.mtx);
+            shared.hasClick = true;
+            shared.clickX = clickX;
+            shared.clickY = clickY;
+        }
+
+        // ── Mode-specific UI ───────────────────────────────────
         ImGui::Spacing();
 
-        switch (app.mode) {
+        switch (ui.mode) {
             case AppMode::kDetection:
-                RenderDetectionUI(app, frame);
+                RenderDetectionUI(shared, ui);
                 break;
 
             case AppMode::kCalibration:
-                if (!app.detectors.empty()) {
-                    size_t idx =
-                        app.detectedGauges.empty() ? 0 : app.currentGaugeIdx;
-                    if (app.detectors[idx].RenderCalibrationUI(
-                            idx, app, videoPath, frame))
-                        app.quit = true;
-                }
+                RenderCalibrationUI(shared, ui);
                 break;
 
             case AppMode::kProcessing:
-                RenderProcessingUI(app);
-                break;
-
-            default:
+                RenderProcessingUI(shared, ui);
                 break;
         }
 
-        if (app.mode == AppMode::kProcessing) app.frameCount++;
-
         ImGui::End();
 
-        // ── Render ───────────────────────────────────────────────────
+        // ── Render ─────────────────────────────────────────────
         ImGui::Render();
         int fbW, fbH;
         glfwGetFramebufferSize(window, &fbW, &fbH);
@@ -409,13 +332,22 @@ int main(int argc, char** argv) {
         glfwSwapBuffers(window);
         glfwPollEvents();
 
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) break;
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+            std::lock_guard<std::mutex> lk(shared.mtx);
+            shared.quit = true;
+        }
     }
 
-    // ── Cleanup ─────────────────────────────────────────────────────
+    // ── Signal worker and wait ────────────────────────────────
+    {
+        std::lock_guard<std::mutex> lk(shared.mtx);
+        shared.quit = true;
+    }
+    worker.join();
 
-    if (app.frameCount > 0) {
-        std::cout << "\n\nDone! " << app.frameCount << " frames processed.\n";
+    // ── Cleanup ───────────────────────────────────────────────
+    if (ui.frameCount > 0) {
+        std::cout << "\n\nDone! " << ui.frameCount << " frames processed.\n";
     }
 
     videoTex.destroy();
@@ -424,8 +356,6 @@ int main(int argc, char** argv) {
     ImGui::DestroyContext();
     glfwDestroyWindow(window);
     glfwTerminate();
-    app.cap.release();
-    if (app.writer.isOpened()) app.writer.release();
 
     return 0;
 }

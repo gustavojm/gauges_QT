@@ -7,9 +7,6 @@
 #include <sstream>
 #include <string>
 
-#include "app_state.h"
-#include "imgui.h"
-
 constexpr int kCircleThickness = 2;
 constexpr int kNeedleThickness = 3;
 constexpr int kCalibPtRadius = 10;
@@ -365,78 +362,4 @@ GaugeDetector::GaugeDetector(const cv::Point& center, int radius,
     gauge_ = {center, radius};
     set_color(color);
     set_state(GaugeState::kCalibMin);
-}
-
-bool GaugeDetector::RenderCalibrationUI(size_t idx, AppState& app,
-                                        const std::string& videoPath,
-                                        cv::Mat& frame) {
-    if (state() == GaugeState::kCircleManual) {
-        if (circle_stage() == 1)
-            ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                               "Click on the CENTER of the gauge");
-        else
-            ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                               "Now click on the EDGE of the gauge face");
-    }
-
-    if (state() == GaugeState::kCalibMin) {
-        if (app.detectedGauges.size() > 1)
-            ImGui::Text("Gauge %zu / %zu", app.currentGaugeIdx + 1,
-                        app.detectors.size());
-        ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           "Click on the MINIMUM value marking");
-    }
-
-    if (state() == GaugeState::kCalibMax)
-        ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           "Now click on the MAXIMUM value marking");
-
-    if (state() == GaugeState::kCalibConfirm) {
-        if (app.detectedGauges.size() > 1)
-            ImGui::Text("Gauge %zu / %zu", app.currentGaugeIdx + 1,
-                        app.detectors.size());
-
-        int minVal = calib_track_min();
-        int maxVal = calib_track_max();
-        if (ImGui::SliderInt("Min value", &minVal, 0, 1000))
-            set_calib_track_min(minVal);
-        if (ImGui::SliderInt("Max value", &maxVal, 0, 1000))
-            set_calib_track_max(maxVal);
-        ImGui::Text("Min = %d   Max = %d", calib_track_min(),
-                    calib_track_max());
-        ImGui::Spacing();
-
-        if (ImGui::Button("Confirm", ImVec2(120, 0))) {
-            CalibrateFromPoints(pt_min(), pt_max());
-            SetCalibrationValues(calib_track_min(), calib_track_max());
-            SetCalibrationValid(true);
-
-            const auto& s = scale();
-            std::cout << "  >> Gauge " << idx << " scale: " << s.min_value
-                      << " at " << (s.start_angle * 180.0 / kPi) << " deg, "
-                      << s.max_value << " at " << (s.end_angle * 180.0 / kPi)
-                      << " deg\n";
-
-            if (app.currentGaugeIdx + 1 < app.detectors.size()) {
-                app.currentGaugeIdx++;
-                app.detectors[app.currentGaugeIdx].set_state(
-                    GaugeState::kCalibMin);
-            } else {
-                std::string outputPath =
-                    videoPath.substr(0, videoPath.find_last_of('.')) +
-                    "_output.avi";
-                int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-                app.writer.open(outputPath, fourcc, app.fps, frame.size());
-                if (app.writer.isOpened())
-                    std::cout << "  >> Output: " << outputPath << "\n";
-                app.cap.set(cv::CAP_PROP_POS_FRAMES, 0);
-                for (auto& det : app.detectors)
-                    det.set_state(GaugeState::kProcessing);
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) return true;
-    }
-
-    return false;
 }
