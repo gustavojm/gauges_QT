@@ -7,6 +7,7 @@
 #include <QMouseEvent>
 #include <QCloseEvent>
 #include <QKeyEvent>
+#include <QThread>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -14,12 +15,10 @@
 #include <QCheckBox>
 #include <QSlider>
 #include <QSpinBox>
-#include <QTimer>
 
 #include <opencv2/opencv.hpp>
 
 #include <iostream>
-#include <thread>
 
 // ═══════════════════════════════════════════════════════════════════
 //  Constants
@@ -28,7 +27,6 @@
 constexpr int kBtnWide = 120;
 constexpr int kBtnNarrow = 80;
 constexpr int kControlPanelWidth = 300;
-constexpr int kPollIntervalMs = 16;
 
 // ═══════════════════════════════════════════════════════════════════
 //  VideoWidget
@@ -43,7 +41,7 @@ VideoWidget::VideoWidget(QWidget* parent)
 }
 
 void VideoWidget::setImage(const QImage& img) {
-    image_ = img.copy(); // deep copy – own the pixel data
+    image_ = img.copy();
     updateScaled();
     update();
 }
@@ -88,7 +86,6 @@ void VideoWidget::mousePressEvent(QMouseEvent* event) {
 // ═══════════════════════════════════════════════════════════════════
 
 MainWindow::MainWindow(const std::string& videoPath)
-    : videoPath_(videoPath)
 {
     setWindowTitle("Gauge Reader");
     resize(1600, 1000);
@@ -119,40 +116,62 @@ MainWindow::MainWindow(const std::string& videoPath)
     controlLayout_->addStretch();
     mainLayout->addWidget(controlPanel_);
 
-    // ── Connections ─────────────────────────────────────────────
+    // ── Register meta-types ─────────────────────────────────────
+    qRegisterMetaType<CalibUIState>();
+
+    // ── Worker + Thread ─────────────────────────────────────────
+    worker_ = new Worker(videoPath);
+    workerThread_ = new QThread(this);
+    worker_->moveToThread(workerThread_);
+
+    connect(worker_, &Worker::frameReady,
+            this, &MainWindow::onFrameReady);
+    connect(worker_, &Worker::gaugeValuesUpdated,
+            this, &MainWindow::onGaugeValuesUpdated);
+    connect(worker_, &Worker::frameCountUpdated,
+            this, &MainWindow::onFrameCountUpdated);
+    connect(worker_, &Worker::detectionUpdated,
+            this, &MainWindow::onDetectionUpdated);
+    connect(worker_, &Worker::calibUIUpdated,
+            this, &MainWindow::onCalibUIUpdated);
+    connect(worker_, &Worker::modeChanged,
+            this, &MainWindow::onModeChanged);
+    connect(worker_, &Worker::finished,
+            this, &MainWindow::onWorkerFinished);
+
+    connect(workerThread_, &QThread::started,
+            worker_, &Worker::start);
+
+    // ── Video click → Worker directly (cross-thread, auto-queued)
     connect(videoWidget_, &VideoWidget::imageClicked,
-            this, &MainWindow::onImageClick);
+            worker_, &Worker::handleClick);
 
-    timer_ = new QTimer(this);
-    connect(timer_, &QTimer::timeout, this, &MainWindow::onPollTimer);
-    timer_->start(kPollIntervalMs);
+    // ── Start worker thread ─────────────────────────────────────
+    workerThread_->start();
 
-    // ── Start worker ────────────────────────────────────────────
-    worker_ = std::thread(WorkerMain, videoPath_, std::ref(shared_));
+    // ── Initial UI state ────────────────────────────────────────
+    setMode(AppMode::kDetection);
 }
 
 MainWindow::~MainWindow() {
-    timer_->stop();
-    {
-        std::lock_guard<std::mutex> lk(shared_.mtx);
-        shared_.quit = true;
+    if (workerThread_ && workerThread_->isRunning()) {
+        QMetaObject::invokeMethod(worker_, "quit", Qt::QueuedConnection);
+        if (!workerThread_->wait(3000))
+            workerThread_->terminate();
     }
-    if (worker_.joinable())
-        worker_.join();
+    delete worker_;
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    {
-        std::lock_guard<std::mutex> lk(shared_.mtx);
-        shared_.quit = true;
-    }
+    if (workerThread_ && workerThread_->isRunning())
+        QMetaObject::invokeMethod(worker_, "quit", Qt::QueuedConnection);
     event->accept();
 }
 
 void MainWindow::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Escape) {
-        std::lock_guard<std::mutex> lk(shared_.mtx);
-        shared_.quit = true;
+        if (workerThread_ && workerThread_->isRunning())
+            QMetaObject::invokeMethod(worker_, "quit", Qt::QueuedConnection);
     }
     QWidget::keyPressEvent(event);
 }
@@ -347,86 +366,47 @@ void MainWindow::buildProcessingUI(QVBoxLayout* parent) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Poll Timer
+//  Worker Signal Slots
 // ═══════════════════════════════════════════════════════════════════
 
-void MainWindow::onPollTimer() {
-    AppMode prevMode = currentMode_;
-    cv::Mat frame;
-    std::vector<double> values;
-    int fCount = 0, tFrames = 0;
-    CalibUIState calib;
-    bool doQuit = false;
-    size_t numGauges = 0;
+void MainWindow::onFrameReady(const QImage& image) {
+    videoWidget_->setImage(image);
+}
 
-    {
-        std::lock_guard<std::mutex> lk(shared_.mtx);
-        if (shared_.quit) {
-            doQuit = true;
+void MainWindow::onGaugeValuesUpdated(const QVector<double>& values) {
+    while (gaugeValueLabels_.size() < values.size()) {
+        auto* lbl = new QLabel(this);
+        lbl->setStyleSheet("color: #00ffff; font-size: 14px;");
+        gaugeValuesLayout_->addWidget(lbl);
+        gaugeValueLabels_.push_back(lbl);
+    }
+    for (size_t i = 0; i < gaugeValueLabels_.size(); ++i) {
+        if (i < values.size()) {
+            gaugeValueLabels_[i]->setText(
+                QString("Gauge %1: %2")
+                    .arg(i + 1)
+                    .arg(values[i], 0, 'f', 2));
+            gaugeValueLabels_[i]->setVisible(true);
         } else {
-            currentMode_ = shared_.mode;
-            if (shared_.frameReady) {
-                shared_.displayFrame.copyTo(frame);
-                shared_.frameReady = false;
-            }
-            values = shared_.gaugeValues;
-            fCount = shared_.frameCount;
-            tFrames = shared_.totalFrames;
-            calib = shared_.calibUI;
-            numGauges = shared_.detectedGauges.size();
+            gaugeValueLabels_[i]->setVisible(false);
         }
-    }
-
-    if (doQuit) {
-        QApplication::quit();
-        return;
-    }
-
-    // Mode switch
-    if (currentMode_ != prevMode) {
-        detectionPage_->setVisible(currentMode_ == AppMode::kDetection);
-        calibrationPage_->setVisible(currentMode_ == AppMode::kCalibration);
-        processingPage_->setVisible(currentMode_ == AppMode::kProcessing);
-    }
-
-    // Video display
-    if (!frame.empty()) {
-        cv::Mat rgb;
-        cv::cvtColor(frame, rgb, cv::COLOR_BGR2RGB);
-        QImage img(rgb.data, rgb.cols, rgb.rows, rgb.step,
-                   QImage::Format_RGB888);
-        videoWidget_->setImage(img.copy());
-    }
-
-    // Mode-specific UI updates
-    if (currentMode_ == AppMode::kDetection) {
-        gaugeCountLabel_->setText(
-            QString("Found %1 gauge(s)").arg(numGauges));
-        bool hasGauges = numGauges > 0;
-        addManualBtn_->setVisible(hasGauges);
-        confirmBtn_->setVisible(hasGauges);
-
-    } else if (currentMode_ == AppMode::kCalibration) {
-        updateCalibrationHelp();
-
-    } else if (currentMode_ == AppMode::kProcessing) {
-        frameCountLabel_->setText(
-            QString("Frame %1 / %2").arg(fCount).arg(tFrames));
-        updateGaugeValueLabels();
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  Calibration Help
-// ═══════════════════════════════════════════════════════════════════
+void MainWindow::onFrameCountUpdated(int current, int total) {
+    frameCountLabel_->setText(
+        QString("Frame %1 / %2").arg(current).arg(total));
+}
 
-void MainWindow::updateCalibrationHelp() {
-    CalibUIState calib;
-    {
-        std::lock_guard<std::mutex> lk(shared_.mtx);
-        calib = shared_.calibUI;
-    }
+void MainWindow::onDetectionUpdated(size_t numGauges) {
+    gaugeCountLabel_->setText(
+        QString("Found %1 gauge(s)").arg(numGauges));
+    bool hasGauges = numGauges > 0;
+    addManualBtn_->setVisible(hasGauges);
+    confirmBtn_->setVisible(hasGauges);
+}
 
+void MainWindow::onCalibUIUpdated(const CalibUIState& calib) {
     if (!calib.initialized) {
         calibrationPage_->setVisible(false);
         return;
@@ -500,127 +480,94 @@ void MainWindow::updateCalibrationHelp() {
         calibConfirmInitialized_ = false;
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  Gauge Value Labels
-// ═══════════════════════════════════════════════════════════════════
+void MainWindow::onModeChanged(AppMode mode) {
+    setMode(mode);
+}
 
-void MainWindow::updateGaugeValueLabels() {
-    std::vector<double> values;
-    {
-        std::lock_guard<std::mutex> lk(shared_.mtx);
-        values = shared_.gaugeValues;
-    }
-
-    while (gaugeValueLabels_.size() < values.size()) {
-        auto* lbl = new QLabel(this);
-        lbl->setStyleSheet("color: #00ffff; font-size: 14px;");
-        gaugeValuesLayout_->addWidget(lbl);
-        gaugeValueLabels_.push_back(lbl);
-    }
-
-    for (size_t i = 0; i < gaugeValueLabels_.size(); ++i) {
-        if (i < values.size()) {
-            gaugeValueLabels_[i]->setText(
-                QString("Gauge %1: %2")
-                    .arg(i + 1)
-                    .arg(values[i], 0, 'f', 2));
-            gaugeValueLabels_[i]->setVisible(true);
-        } else {
-            gaugeValueLabels_[i]->setVisible(false);
-        }
-    }
+void MainWindow::onWorkerFinished() {
+    QApplication::quit();
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Detection Slots
+//  Mode Helper
+// ═══════════════════════════════════════════════════════════════════
+
+void MainWindow::setMode(AppMode mode) {
+    currentMode_ = mode;
+    detectionPage_->setVisible(mode == AppMode::kDetection);
+    calibrationPage_->setVisible(mode == AppMode::kCalibration);
+    processingPage_->setVisible(mode == AppMode::kProcessing);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  User Interaction Slots (forward to Worker)
 // ═══════════════════════════════════════════════════════════════════
 
 void MainWindow::onImageClick(int x, int y) {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.hasClick = true;
-    shared_.clickX = x;
-    shared_.clickY = y;
+    // Handled directly by connection videoWidget_ → Worker::handleClick
 }
 
 void MainWindow::onManualPlacementToggled(bool checked) {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.manualPlacement = checked;
-    if (!checked)
-        shared_.runDetection = true;
+    QMetaObject::invokeMethod(worker_, "setManualPlacement",
+        Qt::QueuedConnection, Q_ARG(bool, checked));
 }
 
 void MainWindow::onCannyChanged(int value) {
     cannyValLabel_->setText(QString::number(value));
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.detectCanny = value;
-    shared_.runDetection = true;
+    QMetaObject::invokeMethod(worker_, "setCanny",
+        Qt::QueuedConnection, Q_ARG(int, value));
 }
 
 void MainWindow::onAccChanged(int value) {
     accValLabel_->setText(QString::number(value));
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.detectAcc = value;
-    shared_.runDetection = true;
+    QMetaObject::invokeMethod(worker_, "setAcc",
+        Qt::QueuedConnection, Q_ARG(int, value));
 }
 
 void MainWindow::onAddManual() {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.command = WorkerCommand::kConfirmAndAddManual;
-    shared_.mode = AppMode::kCalibration;
+    setMode(AppMode::kCalibration);
+    QMetaObject::invokeMethod(worker_, "addManual", Qt::QueuedConnection);
 }
 
 void MainWindow::onConfirmGauges() {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.command = WorkerCommand::kConfirmGauges;
-    shared_.mode = AppMode::kCalibration;
+    setMode(AppMode::kCalibration);
+    QMetaObject::invokeMethod(worker_, "confirmGauges", Qt::QueuedConnection);
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  Calibration Slots
-// ═══════════════════════════════════════════════════════════════════
-
 void MainWindow::onAddAnotherGauge() {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.command = WorkerCommand::kAddManualGauge;
+    QMetaObject::invokeMethod(worker_, "addAnotherGauge", Qt::QueuedConnection);
 }
 
 void MainWindow::onStartCalibration() {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.command = WorkerCommand::kConfirmManualCircles;
+    QMetaObject::invokeMethod(worker_, "startCalibration", Qt::QueuedConnection);
 }
 
 void MainWindow::onConfirmCalib() {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.command = WorkerCommand::kConfirmCalib;
+    QMetaObject::invokeMethod(worker_, "confirmCalib", Qt::QueuedConnection);
 }
 
 void MainWindow::onCancelCalib() {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.quit = true;
+    if (workerThread_ && workerThread_->isRunning())
+        QMetaObject::invokeMethod(worker_, "quit", Qt::QueuedConnection);
 }
 
 void MainWindow::onMinValChanged(int value) {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.calibMinVal = value;
+    QMetaObject::invokeMethod(worker_, "setCalibMin",
+        Qt::QueuedConnection, Q_ARG(int, value));
 }
 
 void MainWindow::onMaxValChanged(int value) {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.calibMaxVal = value;
+    QMetaObject::invokeMethod(worker_, "setCalibMax",
+        Qt::QueuedConnection, Q_ARG(int, value));
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  Processing Slots
-// ═══════════════════════════════════════════════════════════════════
-
 void MainWindow::onRestart() {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.command = WorkerCommand::kRestart;
+    QMetaObject::invokeMethod(worker_, "restart", Qt::QueuedConnection);
 }
 
 void MainWindow::onQuit() {
-    std::lock_guard<std::mutex> lk(shared_.mtx);
-    shared_.quit = true;
+    if (workerThread_ && workerThread_->isRunning())
+        QMetaObject::invokeMethod(worker_, "quit", Qt::QueuedConnection);
 }
 
 // ═══════════════════════════════════════════════════════════════════

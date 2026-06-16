@@ -1,94 +1,145 @@
 # Gauge Reader — Knowledge File
 
+## Architecture
+
+```
+MainWindow (Qt GUI thread)
+    │  ┌─ QThread (worker thread)
+    │  │   Worker (QObject)
+    │  │       │
+    │  │       ├── start()               ──→ opens video, runs initial detection
+    │  │       ├── setCanny(int)         ──→ re-runs HoughCircles
+    │  │       ├── setAcc(int)           ──→ re-runs HoughCircles
+    │  │       ├── setManualPlacement(bool)
+    │  │       ├── handleClick(x, y)     ──→ manual circle or calibration click
+    │  │       ├── confirmGauges()       ──→ detection → calibration
+    │  │       ├── addManual()           ──→ detection → calibration + manual gauge
+    │  │       ├── addAnotherGauge()     ──→ adds manual gauge in calibration
+    │  │       ├── startCalibration()    ──→ circle placement → calibration clicking
+    │  │       ├── confirmCalib()        ──→ finish one gauge, advance or start processing
+    │  │       ├── setCalibMin/Max(int)  ──→ calibration range values
+    │  │       ├── restart()             ──→ reset video to frame 0
+    │  │       └── quit()                ──→ set flag, stop timer, exit event loop
+    │  │
+    │  │   Signals (→ MainWindow):
+    │  │       frameReady(QImage)
+    │  │       gaugeValuesUpdated(QVector<double>)
+    │  │       frameCountUpdated(int, int)
+    │  │       detectionUpdated(size_t)
+    │  │       calibUIUpdated(CalibUIState)
+    │  │       modeChanged(AppMode)
+    │  │       finished()                ──→ init failure only
+    │  │
+    │  └── moveToThread(QThread)
+    │
+    └── QThread::started → Worker::start
+```
+
+### Communication pattern
+- **Main → Worker**: queued slot invocations (`QMetaObject::invokeMethod` or signal→slot connections)
+- **Worker → Main**: queued signals (auto-detected cross-thread by Qt)
+- **No shared state, no mutexes.** The worker owns all processing state as private members, only accessed from the worker thread.
+- `VideoWidget::imageClicked` is connected directly to `Worker::handleClick` (cross-thread, auto-queued).
+
+## Key decisions & lessons
+
+### 1. Never poll — use signals/slots
+The original design used a `QTimer` at 16ms on the GUI thread reading a `SharedState` struct protected by a mutex. This was replaced in two steps:
+
+- **Step 1**: Worker→Main via signals on a bridge QObject (eliminated GUI-side polling)
+- **Step 2**: Converted the worker from a free function + `std::thread` to a `Worker` QObject on a `QThread` (eliminated ALL shared state)
+
+The final design has zero polling and zero mutexes.
+
+### 2. SharedState inevitably becomes a message bus
+The original `SharedState` struct grew to hold every field that crossed the thread boundary (mode, clicks, parameters, frame data, calibration state, gauge values, quit flag). This is a code smell — a struct that doubles as an ad-hoc event system.
+
+Replacing it with explicit signals/slots forces clear ownership:
+- **Who sends?** The signal's origin.
+- **Who receives?** The slot's destination.
+- **What data?** Only the relevant parameters, not the entire kitchen sink.
+
+### 3. QObject + QThread vs std::thread
+Using QObject + QThread instead of std::thread gives:
+- Built-in event loop for queued slot delivery
+- Automatic cross-thread signal/slot queuing
+- Clean shutdown via `QThread::quit()` + `wait()`
+- No manual mutex management
+
+The worker's processing loop (reading video frames) is driven by `QTimer::singleShot(0, ...)` instead of a `while(true)` + `sleep_for`. This yields to the event loop between frames, making the worker responsive to queued commands (quit, restart, etc.) without needing to poll.
+
+### 4. Processing mode is event-driven
+In processing mode, each frame is read and processed in response to a `singleShot(0)` timer event. The worker does not block. When the video ends, processing simply stops (no busy-wait, no sleep). The user can restart via `Worker::restart()` which resets the video position and starts the timer chain again.
+
+### 5. Immediate UI feedback for mode transitions
+When the user clicks "Confirm" or "Add Manually", the page switches immediately via `setMode()` on the main thread, then the command is forwarded to the worker asynchronously. This keeps the UI responsive while the worker processes the command in its own thread.
+
+### 6. Q_DECLARE_METATYPE must precede MOC
+Custom types used in cross-thread signal/slot connections (like `CalibUIState`) need `Q_DECLARE_METATYPE` visible **before** MOC-generated code instantiates the meta-type system. The macro must be placed in a header that is processed early in the translation unit — put it immediately after the struct definition, and include `<QObject>` before it.
+
 ## Pipeline Overview
 1. **Circle detection** — locate the gauge face in the frame (auto HoughCircles, fallback to manual 2-click)
-2. **Interactive calibration** — user clicks min/max scale markings, adjusts slider values in ImGui
+2. **Interactive calibration** — user clicks min/max scale markings, adjusts spinner values
 3. **Video processing loop** — detect needle angle per frame, map to value, overlay + write
 
----
-
-## 1. Circle Detection (`GaugeDetector::detectCircle`)
-- `GaugeDetector` class owns `GaugeROI` (center + radius) and `ScaleCalibration` internally
+## Detection (`GaugeDetector::FindGauges`)
 - Tries 7 HoughCircles parameter sets (dp, canny, acc) *with* Gaussian blur (9×9, σ=2)
 - If all fail, retries the same 7 sets *without* blur
-- If still no detection → manual fallback via `setCircle()`: two-click UI (center then edge) in ImGui
+- If still no detection → manual fallback: two-click UI (center then edge)
 - Radius bounds: `[maxDim/15, maxDim/2]`
 
-## 2. Interactive Calibration
-- Single ImGui/GLFW window "Gauge Reader" — video displayed as OpenGL texture via `ImGui::Image`
-- **Phase 0**: user clicks minimum-value marking on the image
-- **Phase 1**: user clicks maximum-value marking on the image
-- **Phase 2**: two ImGui sliders (0–1000 range); press Confirm button
-- `tryGetClickOnImage()` maps mouse coords from ImGui display rect back to pixel coords
-- Angles from clicks → `calibrateFromPoints()` computes `startAngle`/`endAngle` (via `atan2`)
-- Slider values → `setCalibrationValues()` sets `minValue`/`maxValue`
+## Calibration
+- User clicks minimum-value marking on the image, then maximum-value marking
+- Angles from clicks → `CalibrateFromPoints()` computes `startAngle`/`endAngle` (via `atan2`)
+- Spinner values → `SetCalibrationValues()` sets `minValue`/`maxValue`
+- Supports multiple gauges; user calibrates one then advances to the next
 
-## 3. Needle Detection (`GaugeDetector::detectNeedle`)
+## Needle Detection (`GaugeDetector::DetectNeedle`)
 Two methods, tried in order:
-
-### a) Colored needle (`detectColoredNeedle`)
+### a) Colored needle (`DetectColoredNeedle`)
 - HSV segmentation for red (two hue ranges: 0–10 and 160–179)
 - Morphological close + open to clean mask
-- Find external contours, filter by area (> radius/2) and centroid distance (< 0.6×radius)
+- Find external contours, filter by area and centroid distance
 - Score contours by `maxTipDistance × log(area)`
 - Return angle from center to farthest contour point
-
-### b) Radial scan fallback (`detectNeedleRadial`)
-- Adaptive threshold (Gaussian, block=25, C=8) on masked grayscale
+### b) Radial scan fallback (`DetectNeedleRadial`)
+- Adaptive threshold on masked grayscale
 - 360 radial lines from 8% radius to edge
-- Per angle: scan outward, track longest contiguous dark run + total dark density
 - Score = `density × 0.4 + longestRun/radius × 0.6`
-- Needle has long continuous dark run; tick marks produce only short peripheral dark segments
 
-## 4. Angle-to-Value Mapping (`GaugeDetector::angleToValue`)
-- Normalise all angles to `[0, 2π)`
-- Handle wrap-around scale (e.g. start at 135°, end at 45°)
-- Linear interpolation: `value = min + (needlePos / range) × (max - min)`
-- Clamp to `[0, 1]` before scaling
+## Angle-to-Value Mapping
+- Normalise all angles to `[0, 2π)`, handle wrap-around scale
+- Linear interpolation, clamp to `[min, max]`
 
-## 5. Output Smoothing
-- 5-frame deque of recent values
-- Arithmetic mean for display
+## Smoothing
+- 5-frame moving average via `deque`
 
-## 6. Overlay (`GaugeDetector::drawOverlay`)
-- Green circle around gauge face
-- Green line + value label at start angle ("min")
-- Red line + value label at end angle ("max")
-- Blue needle line from center to 80% radius
-- Yellow "Value: X.XX" text at top-left
+## Overlay (`DrawOverlay`)
+- Colored circle around gauge face
+- Lines at min/max scale markings with value labels
+- Needle line from center to 80% radius
+- Value text at top-left
 
-## 7. Video Output
+## Video Output
 - Codec: MJPG → `*_output.avi`
-- 29.97 fps input, same rate for output
-
----
 
 ## Build
 ```
-cmake -S /home/gustavo/cpp/OpenCV_Examples/gauges \
-      -B /home/gustavo/cpp/OpenCV_Examples/gauges/build
-cmake --build /home/gustavo/cpp/OpenCV_Examples/gauges/build
+cmake -S /home/gustavo/cpp/gauges_QT -B /home/gustavo/cpp/gauges_QT/build
+cmake --build /home/gustavo/cpp/gauges_QT/build
 ```
-
-Run: `./build/gauges ./gauge.mov`
+Run: `./build/gauges <video_path>`
 
 ## Dependencies
-- OpenCV 4.10.0
-- Dear ImGui (via vcpkg, `imgui[glfw-binding,opengl3-binding]`)
-- GLFW3
-- OpenGL
+- OpenCV 4.x
+- Qt6::Widgets
 - C++17
 
-## Key Architecture
-- Single GLFW window, Dear ImGui for all UI (no OpenCV highgui)
-- VideoTexture struct: uploads `cv::Mat` frames as OpenGL textures via `glTexImage2D`
-- `tryGetClickOnImage()`: converts ImGui `Image` click position back to pixel coords
-- Calibration uses ImGui sliders (0–1000 range, raw), not OpenCV trackbars
-- `GaugeDetector` class encapsulates all detection logic; owns `GaugeROI` and `ScaleCalibration` internally
-- GUI works with `detector.gauge()` / `detector.scale()` const accessors; calibration set via methods
-
 ## Files
-- `src/detection.h` — `GaugeDetector` class + structs (GaugeROI, ScaleCalibration, TickMark) (~50 lines)
-- `src/detection.cpp` — all detection/processing logic as class methods (~350 lines)
-- `src/gauge_reader.cpp` — GLFW/ImGui GUI + main() + state machine (~400 lines)
-- `CMakeLists.txt` — build config (OpenCV + imgui + glfw3 + OpenGL)
+- `src/main.cpp` — MainWindow + VideoWidget implementation, `main()`
+- `src/main_window.h` — MainWindow + VideoWidget declarations
+- `src/worker.h` — Worker QObject class declaration
+- `src/worker.cpp` — Worker implementation (all processing logic)
+- `src/gauge_detector.h` — GaugeDetector class + shared types (AppMode, CalibUIState, GaugeROI, etc.)
+- `src/gauge_detector.cpp` — Detection/calibration/needle/overlay implementation
+- `CMakeLists.txt` — Build config (OpenCV + Qt6::Widgets)

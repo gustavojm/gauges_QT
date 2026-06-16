@@ -4,21 +4,22 @@
 #include <QImage>
 #include <QString>
 
-#include <thread>
 #include <string>
 #include <vector>
 
-#include "shared_state.h"
+#include "gauge_detector.h"
 
 class QLabel;
 class QPushButton;
 class QCheckBox;
 class QSlider;
 class QSpinBox;
-class QTimer;
 class QVBoxLayout;
 class QCloseEvent;
 class QKeyEvent;
+class QThread;
+
+class Worker;
 
 // ─── Video Widget ─────────────────────────────────────────────────
 
@@ -55,7 +56,16 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private slots:
-    void onPollTimer();
+    // Worker → Main (via signals)
+    void onFrameReady(const QImage& image);
+    void onGaugeValuesUpdated(const QVector<double>& values);
+    void onFrameCountUpdated(int current, int total);
+    void onDetectionUpdated(size_t numGauges);
+    void onCalibUIUpdated(const CalibUIState& state);
+    void onModeChanged(AppMode mode);
+    void onWorkerFinished();
+
+    // User interaction (forwards to Worker)
     void onImageClick(int x, int y);
     void onManualPlacementToggled(bool checked);
     void onCannyChanged(int value);
@@ -75,17 +85,14 @@ private:
     void buildDetectionUI(QVBoxLayout* parent);
     void buildCalibrationUI(QVBoxLayout* parent);
     void buildProcessingUI(QVBoxLayout* parent);
-    void updateCalibrationHelp();
-    void updateGaugeValueLabels();
+    void setMode(AppMode mode);
 
-    SharedState shared_;
-    std::thread worker_;
-    const std::string videoPath_;
+    Worker* worker_ = nullptr;
+    QThread* workerThread_ = nullptr;
 
     VideoWidget* videoWidget_;
     QWidget* controlPanel_;
     QVBoxLayout* controlLayout_;
-    QTimer* timer_;
     AppMode currentMode_ = AppMode::kDetection;
     bool calibConfirmInitialized_ = false;
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QObject>
+
 #include <deque>
 #include <opencv2/opencv.hpp>
 
@@ -126,3 +128,19 @@ private:
     double value_ = -1;
     double smoothed_value_ = 0;
 };
+
+// ─── Shared Types ─────────────────────────────────────────────────
+
+enum class AppMode { kDetection, kCalibration, kProcessing };
+
+struct CalibUIState {
+    GaugeState state = GaugeState::kInit;
+    int circleStage = 0;
+    size_t currentGauge = 0;
+    size_t totalGauges = 0;
+    bool initialized = false;
+    int calibTrackMin = 0;
+    int calibTrackMax = 1000;
+};
+
+Q_DECLARE_METATYPE(CalibUIState)
