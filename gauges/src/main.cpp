@@ -1,4 +1,4 @@
-#include "gauge_detector.h"
+#include "app_state.h"
 
 #include <opencv2/opencv.hpp>
 #include <GLFW/glfw3.h>
@@ -61,6 +61,159 @@ static bool tryGetClickOnImage(int &outX, int &outY, int imageW, int imageH) {
     return false;
 }
 
+// ─── Application Logic ─────────────────────────────────────────────
+
+static void processTransitions(AppState &app, const cv::Mat &frame) {
+    switch (app.mode) {
+        case AppMode::Detection:
+            if (app.detectCanny != app.prevCanny || app.detectAcc != app.prevAcc) {
+                app.detectedGauges =
+                    GaugeDetector::findGauges(frame, app.detectCanny, app.detectAcc);
+                app.prevCanny = app.detectCanny;
+                app.prevAcc = app.detectAcc;
+            }
+            break;
+
+        case AppMode::Calibration: {
+            // Manual circle → CALIB_MIN transition
+            if (app.detectedGauges.empty() && !app.detectors.empty()) {
+                auto &d = app.detectors[0];
+                if (d.state() == GaugeState::CIRCLE_MANUAL &&
+                    d.circleStage() == 3 && d.circleRadius() > 0) {
+                    d.setCircle(d.circleCenter(), d.circleRadius());
+                    const auto &g = d.gauge();
+                    std::cout << "  >> Gauge at (" << g.center.x << ", "
+                              << g.center.y << "), radius=" << g.radius << "\n";
+                    app.calibFrame = frame.clone();
+                    cv::circle(app.calibFrame, g.center, g.radius, d.color(), 2);
+                    d.setState(GaugeState::CALIB_MIN);
+                }
+            }
+            // All detectors done calibrating → enter Processing mode
+            if (!app.detectors.empty()) {
+                bool allDone = true;
+                for (const auto &det : app.detectors)
+                    if (det.state() != GaugeState::PROCESSING) { allDone = false; break; }
+                if (allDone) app.mode = AppMode::Processing;
+            }
+            break;
+        }
+
+        case AppMode::Processing:
+            break;
+    }
+}
+
+// ─── Display ────────────────────────────────────────────────────────
+
+static cv::Mat buildDisplayImage(const AppState &app, const cv::Mat &frame) {
+    switch (app.mode) {
+        case AppMode::Detection: {
+            cv::Mat disp = frame.clone();
+            static const std::vector<cv::Scalar> previewPalette = {
+                {0, 0, 255}, {255, 0, 0}, {0, 255, 255},
+                {255, 0, 255}, {255, 255, 0}, {0, 165, 255},
+            };
+            for (size_t i = 0; i < app.detectedGauges.size(); i++) {
+                const auto &c = app.detectedGauges[i];
+                const auto &col = previewPalette[i % previewPalette.size()];
+                cv::circle(disp, c.center, c.radius, col, 2);
+                cv::putText(disp, std::to_string(c.radius),
+                            c.center + cv::Point(-20, 5),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
+            }
+            return disp;
+        }
+        case AppMode::Processing:
+            return frame;
+        case AppMode::Calibration: {
+            if (!app.calibFrame.empty()) {
+                cv::Mat disp = app.calibFrame.clone();
+                size_t idx = app.detectedGauges.empty() ? 0 : app.currentGaugeIdx;
+                const auto &d = app.detectors[idx];
+                const auto &g = d.gauge();
+                cv::circle(disp, g.center, g.radius, d.color(), 2);
+                if (d.state() == GaugeState::CALIB_MAX) {
+                    cv::circle(disp, d.ptMin(), 10, cv::Scalar(0, 255, 255), 2);
+                } else if (d.state() == GaugeState::CALIB_CONFIRM) {
+                    cv::circle(disp, d.ptMin(), 10, cv::Scalar(0, 255, 0), 2);
+                    cv::circle(disp, d.ptMax(), 10, cv::Scalar(0, 0, 255), 2);
+                }
+                return disp;
+            }
+            cv::Mat disp = frame.clone();
+            if (!app.detectors.empty()) {
+                const auto &d = app.detectors[0];
+                if (d.state() == GaugeState::CIRCLE_MANUAL && d.circleStage() == 2) {
+                    cv::circle(disp, d.circleCenter(), 5, cv::Scalar(0, 255, 0), -1);
+                    cv::circle(disp, d.circleCenter(), 30, cv::Scalar(0, 255, 0), 1);
+                }
+            }
+            return disp;
+        }
+    }
+    return frame.clone();
+}
+
+// ─── UI Sections ────────────────────────────────────────────────────
+
+static void renderDetectionUI(AppState &app, cv::Mat &frame) {
+    ImGui::Text("Adjust thresholds until circles are detected:");
+    ImGui::SliderInt("Canny threshold", &app.detectCanny, 1, 500);
+    ImGui::SliderInt("Accumulator threshold", &app.detectAcc, 1, 500);
+    ImGui::Text("Found %zu gauge(s)", app.detectedGauges.size());
+    ImGui::Spacing();
+
+    if (!app.detectedGauges.empty()) {
+        if (ImGui::Button("Confirm", ImVec2(120, 0))) {
+            app.detectors.clear();
+            for (size_t i = 0; i < app.detectedGauges.size(); ++i) {
+                app.detectors.emplace_back(app.detectedGauges[i].center,
+                                           app.detectedGauges[i].radius,
+                                           GaugeDetector::nextColor());
+                std::cout << "  >> Gauge " << i << " at ("
+                          << app.detectedGauges[i].center.x << ", "
+                          << app.detectedGauges[i].center.y << "), radius="
+                          << app.detectedGauges[i].radius << "\n";
+            }
+            app.calibFrame = frame.clone();
+            app.currentGaugeIdx = 0;
+            app.mode = AppMode::Calibration;
+        }
+        ImGui::SameLine();
+    }
+
+    if (ImGui::Button("Manual", ImVec2(120, 0))) {
+        std::cout << "  >> Switching to manual circle placement.\n";
+        std::cout << "  >> Click center, then edge.\n";
+        app.detectors.emplace_back();
+        app.detectors[0].setColor(GaugeDetector::nextColor());
+        app.detectors[0].setState(GaugeState::CIRCLE_MANUAL);
+        app.detectors[0].setCircleStage(1);
+        app.mode = AppMode::Calibration;
+    }
+}
+
+static void renderProcessingUI(AppState &app) {
+    ImGui::Text("Frame %d / %d", app.frameCount, app.totalFrames);
+    for (size_t i = 0; i < app.detectors.size(); i++) {
+        ImGui::TextColored(ImVec4(0, 1, 1, 1),
+                           "Gauge %zu: %.2f",
+                           i + 1, app.detectors[i].getSmoothedValue());
+    }
+    ImGui::Spacing();
+
+    if (ImGui::Button("Restart", ImVec2(80, 0))) {
+        app.cap.set(cv::CAP_PROP_POS_FRAMES, 0);
+        for (auto &d : app.detectors) d.resetSmoothing();
+        app.frameCount = 0;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Quit", ImVec2(80, 0))) {
+        app.quit = true;
+    }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────
 
 int main(int argc, char **argv) {
@@ -71,19 +224,20 @@ int main(int argc, char **argv) {
 
     std::string videoPath = argv[1];
 
-    cv::VideoCapture cap(videoPath);
-    if (!cap.isOpened()) {
+    AppState app;
+    app.cap.open(videoPath);
+    if (!app.cap.isOpened()) {
         std::cerr << "Error: Could not open video: " << videoPath << "\n";
         return -1;
     }
 
-    double fps = cap.get(cv::CAP_PROP_FPS);
-    int totalFrames = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
+    app.fps = app.cap.get(cv::CAP_PROP_FPS);
+    app.totalFrames = static_cast<int>(app.cap.get(cv::CAP_PROP_FRAME_COUNT));
     std::cout << "Video: " << videoPath << "\n";
-    std::cout << "FPS: " << fps << ", Total frames: " << totalFrames << "\n";
+    std::cout << "FPS: " << app.fps << ", Total frames: " << app.totalFrames << "\n";
 
     cv::Mat frame;
-    if (!cap.read(frame)) {
+    if (!app.cap.read(frame)) {
         std::cerr << "Error: Could not read first frame\n";
         return -1;
     }
@@ -114,119 +268,34 @@ int main(int argc, char **argv) {
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 130");
 
-    // ── App State ──────────────────────────────────────────────────
-
-    std::vector<GaugeDetector> detectors;
-    std::vector<GaugeROI> detectedGauges;
-    size_t currentGaugeIdx = 0;
     VideoTexture videoTex;
-    cv::Mat calibFrame;
-    int frameCount = 0;
-
-    // Detection tuning parameters
-    int detectCanny = 320;
-    int detectAcc = 40;
-    int prevCanny = -1, prevAcc = -1;
-    
-    // Video writer
-    cv::VideoWriter writer;
 
     // ── Main Loop ──────────────────────────────────────────────────
 
-    while (!glfwWindowShouldClose(window)) {
-        bool allProcessing = !detectors.empty();
-        for (const auto &d : detectors)
-            if (d.state() != GaugeState::PROCESSING) { allProcessing = false; break; }
-
+    while (!glfwWindowShouldClose(window) && !app.quit) {
         // ── Frame acquisition (processing mode only) ────────────────
-        if (allProcessing) {
-            if (!cap.read(frame)) break;
+        if (app.mode == AppMode::Processing) {
+            if (!app.cap.read(frame)) break;
         }
 
-        // ── State machine transitions ───────────────────────────────
-        if (!allProcessing && !detectors.empty()) {
-            // Manual circle -> calibration transition
-            if (detectedGauges.empty()) {
-                auto &d = detectors[0];
-                if (d.state() == GaugeState::CIRCLE_MANUAL &&
-                    d.circleStage() == 3 && d.circleRadius() > 0) {
-                    d.setCircle(d.circleCenter(), d.circleRadius());
-                    const auto &g = d.gauge();
-                    std::cout << "  >> Gauge at (" << g.center.x << ", "
-                              << g.center.y << "), radius=" << g.radius << "\n";
-                    calibFrame = frame.clone();
-                    cv::circle(calibFrame, g.center, g.radius,
-                               d.color(), 2);
-                    d.setState(GaugeState::CALIB_MIN);
-                }
-            }
-        }
+        // ── State transitions ───────────────────────────────────────
+        processTransitions(app, frame);
 
         // ── Processing work ──────────────────────────────────────────
-        if (allProcessing) {
+        if (app.mode == AppMode::Processing) {
             int labelY = 60;
-            for (auto &d : detectors) {
+            for (auto &d : app.detectors) {
                 d.detectNeedle(frame);
                 d.drawOverlay(frame, labelY);
                 labelY += 30;
             }
 
-            if (writer.isOpened())
-                writer.write(frame);
+            if (app.writer.isOpened())
+                app.writer.write(frame);
         }
 
         // ── Build display image ──────────────────────────────────────
-        cv::Mat disp;
-        if (detectors.empty()) {
-            // ── Detection tuning phase ───────────────────────────────
-            if (detectCanny != prevCanny || detectAcc != prevAcc) {
-                detectedGauges =
-                    GaugeDetector::findGauges(frame, detectCanny, detectAcc);
-                prevCanny = detectCanny;
-                prevAcc = detectAcc;
-            }
-            disp = frame.clone();
-            {
-                static const std::vector<cv::Scalar> previewPalette = {
-                    {0, 0, 255}, {255, 0, 0}, {0, 255, 255},
-                    {255, 0, 255}, {255, 255, 0}, {0, 165, 255},
-                };
-                for (size_t i = 0; i < detectedGauges.size(); i++) {
-                    const auto &c = detectedGauges[i];
-                    const auto &col = previewPalette[i % previewPalette.size()];
-                    cv::circle(disp, c.center, c.radius, col, 2);
-                    cv::putText(disp, std::to_string(c.radius),
-                                c.center + cv::Point(-20, 5),
-                                cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
-                }
-            }
-        } else if (allProcessing) {
-            disp = frame;
-        } else if (!calibFrame.empty()) {
-            disp = calibFrame.clone();
-            if (!detectors.empty()) {
-                size_t idx = detectedGauges.empty() ? 0 : currentGaugeIdx;
-                auto &d = detectors[idx];
-                const auto &g = d.gauge();
-                cv::circle(disp, g.center, g.radius, d.color(), 2);
-                if (d.state() == GaugeState::CALIB_MAX) {
-                    cv::circle(disp, d.ptMin(), 10, cv::Scalar(0, 255, 255), 2);
-                } else if (d.state() == GaugeState::CALIB_CONFIRM) {
-                    cv::circle(disp, d.ptMin(), 10, cv::Scalar(0, 255, 0), 2);
-                    cv::circle(disp, d.ptMax(), 10, cv::Scalar(0, 0, 255), 2);
-                }
-            }
-        } else {
-            disp = frame.clone();
-            if (!detectors.empty()) {
-                auto &d = detectors[0];
-                if (d.state() == GaugeState::CIRCLE_MANUAL &&
-                    d.circleStage() == 2) {
-                    cv::circle(disp, d.circleCenter(), 5, cv::Scalar(0, 255, 0), -1);
-                    cv::circle(disp, d.circleCenter(), 30, cv::Scalar(0, 255, 0), 1);
-                }
-            }
-        }
+        cv::Mat disp = buildDisplayImage(app, frame);
 
         // ── Upload texture ───────────────────────────────────────────
         videoTex.update(disp);
@@ -260,74 +329,38 @@ int main(int argc, char **argv) {
         // ── Handle clicks ────────────────────────────────────────────
         int clickX = -1, clickY = -1;
         if (tryGetClickOnImage(clickX, clickY, disp.cols, disp.rows)) {
-            if (!detectors.empty()) {
-                size_t idx = detectedGauges.empty() ? 0 : currentGaugeIdx;
-                // Delegate click handling to the detector instance
-                detectors[idx].handleClick(clickX, clickY);
+            if (!app.detectors.empty()) {
+                size_t idx = app.detectedGauges.empty() ? 0 : app.currentGaugeIdx;
+                app.detectors[idx].handleClick(clickX, clickY);
             }
         }
 
-        // ── State UI ─────────────────────────────────────────────────
+        // ── Mode-specific UI ─────────────────────────────────────────
         ImGui::Spacing();
 
-        if (detectors.empty()) {
-            // ── Detection tuning UI ─────────────────────────────────
-            ImGui::Text("Adjust thresholds until circles are detected:");
-            ImGui::SliderInt("Canny threshold", &detectCanny, 1, 500);
-            ImGui::SliderInt("Accumulator threshold", &detectAcc, 1, 500);
-            ImGui::Text("Found %zu gauge(s)", detectedGauges.size());
+        switch (app.mode) {
+            case AppMode::Detection:
+                renderDetectionUI(app, frame);
+                break;
 
-            ImGui::Spacing();
-            if (!detectedGauges.empty()) {
-                if (ImGui::Button("Confirm", ImVec2(120, 0))) {
-                    // construct detectors directly using the new ctor
-                    detectors.clear();
-                    for (size_t i = 0; i < detectedGauges.size(); ++i) {
-                        detectors.emplace_back(detectedGauges[i].center,
-                                               detectedGauges[i].radius,
-                                               GaugeDetector::nextColor());
-                        std::cout << "  >> Gauge " << i << " at ("
-                                  << detectedGauges[i].center.x << ", "
-                                  << detectedGauges[i].center.y << "), radius="
-                                  << detectedGauges[i].radius << "\n";
-                    }
-                    calibFrame = frame.clone();
-                    currentGaugeIdx = 0;
+            case AppMode::Calibration:
+                if (!app.detectors.empty()) {
+                    size_t idx = app.detectedGauges.empty() ? 0 : app.currentGaugeIdx;
+                    auto &d = app.detectors[idx];
+                    if (d.renderCalibrationUI(idx, app.currentGaugeIdx, app.detectors,
+                                              app.detectedGauges.size(), videoPath,
+                                              app.writer, app.fps, frame, app.cap))
+                        app.quit = true;
                 }
-                ImGui::SameLine();
-            }
-            if (ImGui::Button("Manual", ImVec2(120, 0))) {
-                std::cout << "  >> Switching to manual circle placement.\n";
-                std::cout << "  >> Click center, then edge.\n";
-                detectors.emplace_back();
-                detectors[0].setColor(GaugeDetector::nextColor());
-                detectors[0].setState(GaugeState::CIRCLE_MANUAL);
-                detectors[0].setCircleStage(1);
-            }
-        } else if (!allProcessing && !detectors.empty()) {
-            size_t idx = detectedGauges.empty() ? 0 : currentGaugeIdx;
-            auto &d = detectors[idx];
-            if (d.renderCalibrationUI(idx, currentGaugeIdx, detectors, detectedGauges.size(), videoPath, writer, fps, frame, cap))
+                break;
+
+            case AppMode::Processing:
+                renderProcessingUI(app);
                 break;
         }
 
-        if (allProcessing) {
-            ImGui::Text("Frame %d / %d", frameCount, totalFrames);
-            for (size_t i = 0; i < detectors.size(); i++) {
-                ImGui::TextColored(ImVec4(0,1,1,1),
-                                   "Gauge %zu: %.2f",
-                                   i + 1, detectors[i].getSmoothedValue());
-            }
-            ImGui::Spacing();
-            if (ImGui::Button("Restart", ImVec2(80, 0))) {
-                cap.set(cv::CAP_PROP_POS_FRAMES, 0);
-                for (auto &d : detectors) d.resetSmoothing();
-                frameCount = 0;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Quit", ImVec2(80, 0))) break;
-            frameCount++;
-        }
+        if (app.mode == AppMode::Processing)
+            app.frameCount++;
 
         ImGui::End();
 
@@ -347,8 +380,8 @@ int main(int argc, char **argv) {
 
     // ── Cleanup ─────────────────────────────────────────────────────
 
-    if (frameCount > 0) {
-        std::cout << "\n\nDone! " << frameCount << " frames processed.\n";
+    if (app.frameCount > 0) {
+        std::cout << "\n\nDone! " << app.frameCount << " frames processed.\n";
     }
 
     videoTex.destroy();
@@ -357,8 +390,8 @@ int main(int argc, char **argv) {
     ImGui::DestroyContext();
     glfwDestroyWindow(window);
     glfwTerminate();
-    cap.release();
-    if (writer.isOpened()) writer.release();
+    app.cap.release();
+    if (app.writer.isOpened()) app.writer.release();
 
     return 0;
 }
