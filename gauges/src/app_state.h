@@ -1,17 +1,14 @@
 #pragma once
 
-#include "gauge_detector.h"
 #include <opencv2/opencv.hpp>
 #include <vector>
 
-enum class AppMode {
-    Detection,
-    Calibration,
-    Processing
-};
+#include "gauge_detector.h"
+
+enum class AppMode { kDetection, kCalibration, kProcessing };
 
 struct AppState {
-    AppMode mode = AppMode::Detection;
+    AppMode mode = AppMode::kDetection;
 
     std::vector<GaugeDetector> detectors;
     std::vector<GaugeROI> detectedGauges;

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <opencv2/opencv.hpp>
 #include <deque>
+#include <opencv2/opencv.hpp>
 
 struct AppState;
 
@@ -11,126 +11,125 @@ struct GaugeROI {
 };
 
 struct ScaleCalibration {
-    double startAngle;
-    double endAngle;
-    double minValue;
-    double maxValue;
+    double start_angle;
+    double end_angle;
+    double min_value;
+    double max_value;
     bool valid;
 };
 
-inline constexpr double PI = 3.14159265358979323846;
+inline constexpr double kPi = 3.14159265358979323846;
 
 enum class GaugeState {
-    INIT,
-    CIRCLE_MANUAL,
-    CALIB_MIN,
-    CALIB_MAX,
-    CALIB_CONFIRM,
-    PROCESSING
+    kInit,
+    kCircleManual,
+    kCalibMin,
+    kCalibMax,
+    kCalibConfirm,
+    kProcessing
 };
 
 class GaugeDetector {
 public:
     GaugeDetector() = default;
-    GaugeDetector(const cv::Point &center, int radius, const cv::Scalar &color);
+    GaugeDetector(const cv::Point& center, int radius, const cv::Scalar& color);
 
     // ─── Static: Find all gauges in a frame ─────────────────────────
-    static std::vector<GaugeROI> findGauges(const cv::Mat &frame,
-                                             int cannyThreshold,
-                                             int accumulatorThreshold);
+    static std::vector<GaugeROI> FindGauges(const cv::Mat& frame,
+                                            int cannyThreshold,
+                                            int accumulatorThreshold);
 
     // ─── State Machine ──────────────────────────────────────────────
-    GaugeState state() const { return m_state; }
-    void setState(GaugeState s) { m_state = s; }
+    GaugeState state() const { return state_; }
+    void set_state(GaugeState s) { state_ = s; }
 
-    int circleStage() const { return m_circleStage; }
-    void setCircleStage(int stage) { m_circleStage = stage; }
-    const cv::Point &circleCenter() const { return m_circleCenter; }
-    void setCircleCenter(const cv::Point &pt) { m_circleCenter = pt; }
-    int circleRadius() const { return m_circleRadius; }
-    void setCircleRadius(int r) { m_circleRadius = r; }
+    int circle_stage() const { return circle_stage_; }
+    void set_circle_stage(int stage) { circle_stage_ = stage; }
+    const cv::Point& circle_center() const { return circle_center_; }
+    void set_circle_center(const cv::Point& pt) { circle_center_ = pt; }
+    int circle_radius() const { return circle_radius_; }
+    void set_circle_radius(int r) { circle_radius_ = r; }
 
-    const cv::Point &ptMin() const { return m_ptMin; }
-    void setPtMin(const cv::Point &pt) { m_ptMin = pt; }
-    const cv::Point &ptMax() const { return m_ptMax; }
-    void setPtMax(const cv::Point &pt) { m_ptMax = pt; }
+    const cv::Point& pt_min() const { return pt_min_; }
+    void set_pt_min(const cv::Point& pt) { pt_min_ = pt; }
+    const cv::Point& pt_max() const { return pt_max_; }
+    void set_pt_max(const cv::Point& pt) { pt_max_ = pt; }
 
-    int calibTrackMin() const { return m_calibTrackMin; }
-    void setCalibTrackMin(int v) { m_calibTrackMin = v; }
-    int calibTrackMax() const { return m_calibTrackMax; }
-    void setCalibTrackMax(int v) { m_calibTrackMax = v; }
+    int calib_track_min() const { return calib_track_min_; }
+    void set_calib_track_min(int v) { calib_track_min_ = v; }
+    int calib_track_max() const { return calib_track_max_; }
+    void set_calib_track_max(int v) { calib_track_max_ = v; }
 
     // ─── Circle ─────────────────────────────────────────────────────
-    void setCircle(const cv::Point &center, int radius);
+    void SetCircle(const cv::Point& center, int radius);
 
     // ─── Needle Detection ───────────────────────────────────────────
-    double detectNeedle(const cv::Mat &frame);
+    double DetectNeedle(const cv::Mat& frame);
 
     // ─── Calibration ────────────────────────────────────────────────
-    void calibrateFromPoints(const cv::Point &ptMin, const cv::Point &ptMax);
-    void setCalibrationValues(double minVal, double maxVal);
-    void setCalibrationValid(bool valid);
+    void CalibrateFromPoints(const cv::Point& pt_min, const cv::Point& pt_max);
+    void SetCalibrationValues(double minVal, double maxVal);
+    void SetCalibrationValid(bool valid);
 
     // ─── Value Mapping ──────────────────────────────────────────────
-    double angleToValue(double needleAngle) const;
+    double AngleToValue(double needleAngle) const;
 
     // ─── Overlay Drawing ────────────────────────────────────────────
-    void drawOverlay(cv::Mat &frame, int labelY = 60) const;
+    void DrawOverlay(cv::Mat& frame, int labelY = 60) const;
 
     // ─── State Access ───────────────────────────────────────────────
-    const GaugeROI &gauge() const { return m_gauge; }
-    const ScaleCalibration &scale() const { return m_scale; }
+    const GaugeROI& gauge() const { return gauge_; }
+    const ScaleCalibration& scale() const { return scale_; }
 
     // ─── Color ───────────────────────────────────────────────────────
-    const cv::Scalar &color() const { return m_color; }
-    void setColor(const cv::Scalar &c) { m_color = c; }
-    static cv::Scalar nextColor();
+    const cv::Scalar& color() const { return color_; }
+    void set_color(const cv::Scalar& c) { color_ = c; }
+    static cv::Scalar NextColor();
 
     // ─── Smoothing ──────────────────────────────────────────────────
-    double smoothReadings(double value);
-    double getSmoothedValue() const;
-    void resetSmoothing() {
-        valueHistory.clear();
-        smoothedValue = 0;
+    double SmoothReadings(double value);
+    double GetSmoothedValue() const;
+    void ResetSmoothing() {
+        value_history_.clear();
+        smoothed_value_ = 0;
     }
 
     // Handle a click coming from the UI while in manual / calibration modes.
     // Behavior matches previous inline code in gauge_reader.cpp:
     //  - CIRCLE_MANUAL stage 1 -> set center, advance to stage 2
     //  - CIRCLE_MANUAL stage 2 -> set radius, advance to stage 3
-    //  - CALIB_MIN -> set ptMin, advance to CALIB_MAX
-    //  - CALIB_MAX -> set ptMax, advance to CALIB_CONFIRM
-    void handleClick(int clickX, int clickY);
+    //  - CALIB_MIN -> set pt_min, advance to CALIB_MAX
+    //  - CALIB_MAX -> set pt_max, advance to CALIB_CONFIRM
+    void HandleClick(int clickX, int clickY);
 
     // Render the calibration UI for this detector.
     // Returns true if the user pressed "Cancel" (request to exit main loop).
-    bool renderCalibrationUI(size_t idx, AppState &app,
-                             const std::string &videoPath,
-                             cv::Mat &frame);
+    bool RenderCalibrationUI(size_t idx, AppState& app,
+                             const std::string& videoPath, cv::Mat& frame);
 
 private:
-    GaugeROI m_gauge{};
-    ScaleCalibration m_scale{0, 0, 0, 1000, false};
+    GaugeROI gauge_{};
+    ScaleCalibration scale_{0, 0, 0, 1000, false};
 
     // Color
-    cv::Scalar m_color{0, 255, 0};
+    cv::Scalar color_{0, 255, 0};
 
     // State machine
-    GaugeState m_state = GaugeState::INIT;
-    int m_circleStage = 0;
-    cv::Point m_circleCenter;
-    int m_circleRadius = 0;
-    cv::Point m_ptMin, m_ptMax;
-    int m_calibTrackMin = 0;
-    int m_calibTrackMax = 1000;
+    GaugeState state_ = GaugeState::kInit;
+    int circle_stage_ = 0;
+    cv::Point circle_center_;
+    int circle_radius_ = 0;
+    cv::Point pt_min_, pt_max_;
+    int calib_track_min_ = 0;
+    int calib_track_max_ = 1000;
 
-    cv::Mat createMask(const cv::Mat &frame) const;
-    double detectColoredNeedle(const cv::Mat &frame) const;
-    double detectNeedleRadial(const cv::Mat &frame) const;
+    cv::Mat CreateMask(const cv::Mat& frame) const;
+    double DetectColoredNeedle(const cv::Mat& frame) const;
+    double DetectNeedleRadial(const cv::Mat& frame) const;
 
-    std::deque<double> valueHistory;
-    const int smoothWindow = 5;
-    double angle = -1;
-    double value = -1;
-    double smoothedValue = 0;
+    std::deque<double> value_history_;
+    const int smooth_window_ = 5;
+    double angle_ = -1;
+    double value_ = -1;
+    double smoothed_value_ = 0;
 };
