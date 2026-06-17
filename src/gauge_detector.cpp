@@ -336,6 +336,17 @@ cv::Scalar GaugeDetector::NextColor() {
 }
 
 void GaugeDetector::HandleClick(int clickX, int clickY) {
+    if (state_ == GaugeState::kCircleManual) {
+        if (circle_stage_ == 3 && circle_radius_ > 0 &&
+            gauge_.radius == 0) {
+            SetCircle(circle_center_, circle_radius_);
+            const auto& g = gauge_;
+            std::cout << "  >> Gauge " << currentGaugeIdx_
+                        << " at (" << g.center.x << ", " << g.center.y
+                        << "), radius=" << g.radius << "\n";            
+        }
+    }
+
     if (state() == GaugeState::kCircleManual) {
         if (circle_stage_ == 1) {
             circle_center_ = cv::Point(clickX, clickY);
@@ -356,7 +367,7 @@ GaugeDetector::GaugeDetector(const cv::Point& center, int radius,
                              const cv::Scalar& color) {
     gauge_ = {center, radius};
     set_color(color);
-    set_state(GaugeState::kCalibrating);
+    state_ = GaugeState::kCalibrating;
     // Default markers at 135° (top-right) and 45° (top-left)
     double a = 3.0 * kPi / 4.0;
     pt_min_ = center + cv::Point(cvRound(radius * std::cos(a)),

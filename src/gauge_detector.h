@@ -41,15 +41,11 @@ public:
                                             int accumulatorThreshold);
 
     // ─── State Machine ──────────────────────────────────────────────
-    GaugeState state() const { return state_; }
-    void set_state(GaugeState s) { state_ = s; }
+    GaugeState state() const { return state_; }    
 
-    int circle_stage() const { return circle_stage_; }
-    void set_circle_stage(int stage) { circle_stage_ = stage; }
-    const cv::Point& circle_center() const { return circle_center_; }
-    void set_circle_center(const cv::Point& pt) { circle_center_ = pt; }
-    int circle_radius() const { return circle_radius_; }
-    void set_circle_radius(int r) { circle_radius_ = r; }
+    int circle_stage() const { return circle_stage_; }    
+    const cv::Point& circle_center() const { return circle_center_; }    
+    int circle_radius() const { return circle_radius_; }    
 
     const cv::Point& pt_min() const { return pt_min_; }
     const cv::Point& pt_max() const { return pt_max_; }
