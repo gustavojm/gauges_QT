@@ -138,6 +138,17 @@ MainWindow::MainWindow(const std::string& videoPath)
     workerThread_ = new QThread(this);
     worker_->moveToThread(workerThread_);
 
+    // Worker self-deletes after its thread finishes — no manual delete needed
+    connect(workerThread_, &QThread::finished,
+            worker_, &QObject::deleteLater);
+
+    // Worker stops its event loop when we ask it to quit
+    connect(this, &MainWindow::quitRequested,
+            worker_, &Worker::quit);           // assumes Worker::quit() calls
+                                               // QThread's quit or sets a flag
+    connect(workerThread_, &QThread::started,
+            worker_, &Worker::start);
+
     // Worker → Main
     connect(worker_, &Worker::frameReady, this,
             [this](const QImage& img) { videoWidget_->setImage(img); });
@@ -174,17 +185,19 @@ MainWindow::MainWindow(const std::string& videoPath)
 
 MainWindow::~MainWindow() {
     if (workerThread_ && workerThread_->isRunning()) {
-        emit quitRequested();
-        if (!workerThread_->wait(3000))
-            workerThread_->terminate();
+        emit quitRequested();                   // signal worker to finish
+        if (!workerThread_->wait(3000)) {
+            qWarning("Worker thread did not stop in time — abandoning.");
+            // Do NOT call terminate(). Let the OS clean up on process exit.
+            // workerThread_ itself is a child of this, so Qt will delete it,
+            // and the QThread::finished → deleteLater chain handles worker_.
+        }
     }
-    delete worker_;
+    // No `delete worker_` here — deleteLater via QThread::finished handles it.
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    if (workerThread_ && workerThread_->isRunning())
-        emit quitRequested();
-    event->accept();
+    event->accept();   // destructor handles cleanup
 }
 
 void MainWindow::keyPressEvent(QKeyEvent* event) {

@@ -10,9 +10,6 @@
 constexpr int kCircleThickness = 2;
 constexpr int kNeedleThickness = 3;
 constexpr int kCalibPtRadius = 10;
-constexpr int kManualCenterRadius = 5;
-constexpr int kManualGuideRadius = 30;
-
 void GaugeDetector::SetCircle(const cv::Point& center, int radius) {
     gauge_ = {center, radius};
 }

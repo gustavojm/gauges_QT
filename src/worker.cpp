@@ -5,6 +5,23 @@
 
 #include <iostream>
 
+namespace {
+
+void drawDashedCircle(cv::Mat& img, cv::Point center, int radius,
+                      cv::Scalar color, int thickness) {
+    constexpr int kSegments = 20;
+    constexpr double kDashAngle = 2.0 * kPi / kSegments;
+    for (int i = 0; i < kSegments; i += 2) {
+        double a0 = i * kDashAngle;
+        double a1 = (i + 1) * kDashAngle;
+        cv::ellipse(img, center, cv::Size(radius, radius), 0,
+                    a0 * 180.0 / kPi, a1 * 180.0 / kPi,
+                    color, thickness);
+    }
+}
+
+} // namespace
+
 // ═══════════════════════════════════════════════════════════════════
 //  Construction / Destruction
 // ═══════════════════════════════════════════════════════════════════
@@ -165,8 +182,18 @@ void Worker::handleClick(int x, int y) {
         for (const auto& g : detectedGauges_) {
             cv::circle(disp, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
         }
+        cv::circle(disp, manualCenter_, kManualCenterRadius,
+                   cv::Scalar(0, 255, 255), -1);
+        drawDashedCircle(disp, manualCenter_, kManualGuideRadius,
+                         cv::Scalar(0, 255, 255), 1);
         if (manualPending_) {
-            cv::circle(disp, manualCenter_, 5, cv::Scalar(0, 255, 255), -1);
+            cv::putText(disp, "Now click on the EDGE of the gauge face",
+                        cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX,
+                        1.0, cv::Scalar(0, 255, 255), 2);
+        } else {
+            cv::putText(disp, "Click on the CENTER of the gauge",
+                        cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX,
+                        1.0, cv::Scalar(0, 255, 255), 2);
         }
         emit frameReady(matToQImage(disp));
         emit detectionUpdated(detectedGauges_.size());
@@ -241,10 +268,10 @@ void Worker::publishCalibrationDisplay() {
     // Circle manual placement
     if (cur.state() == GaugeState::kCircleManual) {
         if (cur.circle_stage() == 2) {
-            cv::circle(disp, cur.circle_center(), 5,
+            cv::circle(disp, cur.circle_center(), kManualCenterRadius,
                        cv::Scalar(0, 255, 0), -1);
-            cv::circle(disp, cur.circle_center(), 30,
-                       cv::Scalar(0, 255, 0), 1);
+            drawDashedCircle(disp, cur.circle_center(), kManualGuideRadius,
+                             cv::Scalar(0, 255, 0), 1);
         }
         emit frameReady(matToQImage(disp));
         return;
