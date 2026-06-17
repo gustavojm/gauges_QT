@@ -34,6 +34,8 @@ add_executable(${PROJECT_NAME}
   src/gauge_detector.h
   src/worker.cpp
   src/worker.h
+  src/Section.cpp
+  src/Section.h
 )
 
 list(APPEND CMAKE_PREFIX_PATH "/home/gustavo/vcpkg/installed/x64-linux")

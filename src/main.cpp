@@ -132,6 +132,7 @@ MainWindow::MainWindow(const std::string& videoPath)
 
     // ── Register meta-types ─────────────────────────────────────
     qRegisterMetaType<CalibUIState>();
+    qRegisterMetaType<QVector<GaugeCalibData>>();
 
     // ── Worker + Thread ─────────────────────────────────────────
     worker_ = new Worker(videoPath);

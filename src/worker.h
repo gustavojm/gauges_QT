@@ -11,6 +11,13 @@
 
 #include "gauge_detector.h"
 
+struct GaugeCalibData {
+    double value = 0;
+    double minValue = 0;
+    double maxValue = 1000;
+    uint32_t colorRgb = 0x00FF00;
+};
+
 class QTimer;
 
 class Worker : public QObject {
@@ -21,7 +28,7 @@ public:
 
 signals:
     void frameReady(const QImage& image);
-    void gaugeValuesUpdated(const QVector<double>& values);
+    void gaugeCalibUpdated(const QVector<GaugeCalibData>& calib);
     void frameCountUpdated(int current, int total);
     void detectionUpdated(size_t numGauges);
     void calibUIUpdated(const CalibUIState& state);
@@ -37,9 +44,8 @@ public slots:
     void setAcc(int value);
     void confirmGauges();
     void confirmCalib();
-    void setCalibMin(int value);
-    void setCalibMax(int value);
     void startCalibration();
+    void setGaugeCalibRange(int idx, double minVal, double maxVal);
     void handleDragMove(int x, int y);
     void handleDragRelease();
     void restart();
@@ -75,8 +81,6 @@ private:
     int canny_ = 320;
     int acc_ = 40;
     bool manualPlacement_ = false;
-    int calibMinVal_ = 0;
-    int calibMaxVal_ = 1000;
     int frameCount_ = 0;
 
     AppMode mode_ = AppMode::kDetection;

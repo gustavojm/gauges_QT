@@ -1,9 +1,9 @@
 #include "calibration_page.h"
-#include "worker.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -33,29 +33,14 @@ CalibrationPage::CalibrationPage(QWidget* parent)
     startCalibBtn_->setVisible(false);
     lay->addWidget(startCalibBtn_);
 
-    calibConfirmWidget_ = new QWidget(this);
-    auto* cl = new QVBoxLayout(calibConfirmWidget_);
-    cl->setContentsMargins(0, 0, 0, 0);
-    cl->setSpacing(8);
-
-    auto* minRow = new QWidget(this);
-    auto* mhl = new QHBoxLayout(minRow);
-    mhl->setContentsMargins(0, 0, 0, 0);
-    mhl->addWidget(new QLabel("Min value:", this));
-    minValSpin_ = new QSpinBox(this);
-    minValSpin_->setRange(0, 10000);
-    mhl->addWidget(minValSpin_, 1);
-    cl->addWidget(minRow);
-
-    auto* maxRow = new QWidget(this);
-    auto* Mhl = new QHBoxLayout(maxRow);
-    Mhl->setContentsMargins(0, 0, 0, 0);
-    Mhl->addWidget(new QLabel("Max value:", this));
-    maxValSpin_ = new QSpinBox(this);
-    maxValSpin_->setRange(0, 10000);
-    maxValSpin_->setValue(1000);
-    Mhl->addWidget(maxValSpin_, 1);
-    cl->addWidget(maxRow);
+    scrollArea_ = new QScrollArea(this);
+    scrollArea_->setWidgetResizable(true);
+    scrollContent_ = new QWidget(this);
+    sectionsLayout_ = new QVBoxLayout(scrollContent_);
+    sectionsLayout_->setContentsMargins(0, 0, 0, 0);
+    sectionsLayout_->setSpacing(4);
+    scrollArea_->setWidget(scrollContent_);
+    lay->addWidget(scrollArea_, 1);
 
     auto* calBtnRow = new QWidget(this);
     auto* cbl = new QHBoxLayout(calBtnRow);
@@ -71,26 +56,75 @@ CalibrationPage::CalibrationPage(QWidget* parent)
             this, &CalibrationPage::confirmCalibClicked);
     connect(cancelCalibBtn_, &QPushButton::clicked,
             this, &CalibrationPage::cancelCalibClicked);
-    cl->addWidget(calBtnRow);
+    lay->addWidget(calBtnRow);
+}
 
-    connect(minValSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
-            this, &CalibrationPage::minValChanged);
-    connect(maxValSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
-            this, &CalibrationPage::maxValChanged);
+void CalibrationPage::rebuildSections(const QVector<GaugeCalibData>& calib) {
+    while (!sections_.empty()) {
+        auto& s = sections_.back();
+        sectionsLayout_->removeWidget(s.section);
+        delete s.section;
+        sections_.pop_back();
+    }
 
-    calibConfirmWidget_->setVisible(false);
-    lay->addWidget(calibConfirmWidget_);
+    for (int i = 0; i < calib.size(); i++) {
+        QString colorName = QString("#%1").arg(calib[i].colorRgb, 6, 16, QChar('0'));
+        auto* sec = new ui::Section(
+            QString("Gauge %1").arg(i + 1),
+            0, scrollContent_);
+        sec->setStyleSheet(
+            QString("ui--Section { background: #2a2a32; border-radius: 4px; }"
+                    "ui--Section QToolButton { color: %1; }")
+                .arg(colorName));
 
-    lay->addStretch();
+        auto* cl = new QVBoxLayout();
+        cl->setContentsMargins(8, 4, 8, 8);
+        cl->setSpacing(6);
+
+        auto* minRow = new QWidget();
+        auto* minLay = new QHBoxLayout(minRow);
+        minLay->setContentsMargins(0, 0, 0, 0);
+        minLay->addWidget(new QLabel("Min:"));
+        auto* minSpin = new QSpinBox();
+        minSpin->setRange(0, 10000);
+        minSpin->setValue(static_cast<int>(calib[i].minValue));
+        minLay->addWidget(minSpin, 1);
+        cl->addWidget(minRow);
+
+        auto* maxRow = new QWidget();
+        auto* maxLay = new QHBoxLayout(maxRow);
+        maxLay->setContentsMargins(0, 0, 0, 0);
+        maxLay->addWidget(new QLabel("Max:"));
+        auto* maxSpin = new QSpinBox();
+        maxSpin->setRange(0, 10000);
+        maxSpin->setValue(static_cast<int>(calib[i].maxValue));
+        maxLay->addWidget(maxSpin, 1);
+        cl->addWidget(maxRow);
+
+        sec->setContentLayout(*cl);
+        sectionsLayout_->addWidget(sec);
+
+        connect(minSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [this, i](int v) {
+                    auto& s = sections_[i];
+                    emit gaugeCalibRangeChanged(i, static_cast<double>(v),
+                                                s.maxSpin->value());
+                });
+        connect(maxSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [this, i](int v) {
+                    auto& s = sections_[i];
+                    emit gaugeCalibRangeChanged(i, s.minSpin->value(),
+                                                static_cast<double>(v));
+                });
+
+        sections_.push_back({sec, minSpin, maxSpin});
+    }
 }
 
 void CalibrationPage::onCalibUIUpdated(const CalibUIState& calib) {
-    if (!calib.initialized) {
-        calibConfirmInitialized_ = false;
-        return;
-    }
+    if (!calib.initialized) return;
 
-    bool showCalibrating = false;
+    currentGaugeIdx_ = static_cast<int>(calib.currentGauge);
 
     switch (calib.state) {
     case GaugeState::kCircleManual:
@@ -116,24 +150,20 @@ void CalibrationPage::onCalibUIUpdated(const CalibUIState& calib) {
         calibInstruction_->setText(
             "Drag markers to set min/max positions,\n"
             "adjust values, then confirm");
-        showCalibrating = true;
-
-        if (!calibConfirmInitialized_) {
-            minValSpin_->setValue(calib.calibTrackMin);
-            maxValSpin_->setValue(calib.calibTrackMax);
-            calibConfirmInitialized_ = true;
-        }
         break;
 
     default:
         break;
     }
 
-    startCalibBtn_->setVisible(false);
-    calibConfirmWidget_->setVisible(showCalibrating);
+    startCalibBtn_->setVisible(calib.state == GaugeState::kCircleManual);
+}
 
-    if (calib.state != GaugeState::kCalibrating)
-        calibConfirmInitialized_ = false;
+void CalibrationPage::onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib) {
+    if (calib.isEmpty()) return;
+
+    if (sections_.size() != static_cast<size_t>(calib.size()))
+        rebuildSections(calib);
 }
 
 void CalibrationPage::connectToWorker(Worker* worker) {
@@ -143,10 +173,10 @@ void CalibrationPage::connectToWorker(Worker* worker) {
             worker, &Worker::confirmCalib);
     connect(this, &CalibrationPage::cancelCalibClicked,
             worker, &Worker::quit);
-    connect(this, &CalibrationPage::minValChanged,
-            worker, &Worker::setCalibMin);
-    connect(this, &CalibrationPage::maxValChanged,
-            worker, &Worker::setCalibMax);
+    connect(this, &CalibrationPage::gaugeCalibRangeChanged,
+            worker, &Worker::setGaugeCalibRange);
     connect(worker, &Worker::calibUIUpdated,
             this, &CalibrationPage::onCalibUIUpdated);
+    connect(worker, &Worker::gaugeCalibUpdated,
+            this, &CalibrationPage::onGaugeCalibUpdated);
 }

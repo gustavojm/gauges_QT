@@ -7,6 +7,12 @@
 
 namespace {
 
+static uint32_t bgrToRgb(const cv::Scalar& c) {
+    return (static_cast<uint32_t>(c[2]) << 16) |
+           (static_cast<uint32_t>(c[1]) << 8)  |
+           static_cast<uint32_t>(c[0]);
+}
+
 void drawDashedCircle(cv::Mat& img, cv::Point center, int radius,
                       cv::Scalar color, int thickness) {
     constexpr int kSegments = 20;
@@ -17,6 +23,28 @@ void drawDashedCircle(cv::Mat& img, cv::Point center, int radius,
         cv::ellipse(img, center, cv::Size(radius, radius), 0,
                     a0 * 180.0 / kPi, a1 * 180.0 / kPi,
                     color, thickness);
+    }
+}
+
+void drawGaugeNumber(cv::Mat& img, cv::Point center, int number,
+                     cv::Scalar color) {
+    cv::putText(img, std::to_string(number),
+                center - cv::Point(8, 8),
+                cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
+}
+
+void drawAllGauges(cv::Mat& img,
+                   const std::vector<GaugeDetector>& detectors,
+                   int highlightIdx = -1) {
+    for (size_t i = 0; i < detectors.size(); i++) {
+        const auto& d = detectors[i];
+        if (d.gauge().radius <= 0) continue;
+        cv::Scalar color = (static_cast<int>(i) == highlightIdx)
+                               ? cv::Scalar(0, 255, 255)
+                               : d.color();
+        cv::circle(img, d.gauge().center, d.gauge().radius, color, 2);
+        drawGaugeNumber(img, d.gauge().center, static_cast<int>(i + 1),
+                        color);
     }
 }
 
@@ -179,8 +207,11 @@ void Worker::handleClick(int x, int y) {
         }
 
         cv::Mat disp = firstFrame_.clone();
-        for (const auto& g : detectedGauges_) {
+        for (size_t i = 0; i < detectedGauges_.size(); i++) {
+            const auto& g = detectedGauges_[i];
             cv::circle(disp, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
+            drawGaugeNumber(disp, g.center, static_cast<int>(i + 1),
+                            cv::Scalar(0, 255, 0));
         }
         cv::circle(disp, manualCenter_, kManualCenterRadius,
                    cv::Scalar(0, 255, 255), -1);
@@ -199,40 +230,51 @@ void Worker::handleClick(int x, int y) {
         emit detectionUpdated(detectedGauges_.size());
 
     } else if (mode_ == AppMode::kCalibration && !detectors_.empty()) {
-        auto& d = detectors_[currentGaugeIdx_];
-        if (d.state() == GaugeState::kCircleManual) {
-            d.HandleClick(x, y);
-            if (d.circle_stage() == 3 && d.circle_radius() > 0 &&
-                d.gauge().radius == 0) {
-                d.SetCircle(d.circle_center(), d.circle_radius());
-                const auto& g = d.gauge();
+        auto& cur = detectors_[currentGaugeIdx_];
+        if (cur.state() == GaugeState::kCircleManual) {
+            cur.HandleClick(x, y);
+            if (cur.circle_stage() == 3 && cur.circle_radius() > 0 &&
+                cur.gauge().radius == 0) {
+                cur.SetCircle(cur.circle_center(), cur.circle_radius());
+                const auto& g = cur.gauge();
                 std::cout << "  >> Gauge " << currentGaugeIdx_
                           << " at (" << g.center.x << ", " << g.center.y
                           << "), radius=" << g.radius << "\n";
                 calibFrame_ = firstFrame_.clone();
-                // Auto-advance to calibrating with default markers
                 double a = 3.0 * kPi / 4.0;
-                d.set_pt_min(d.gauge().center + cv::Point(
-                    cvRound(d.gauge().radius * std::cos(a)),
-                    cvRound(d.gauge().radius * std::sin(a))));
+                cur.set_pt_min(cur.gauge().center + cv::Point(
+                    cvRound(cur.gauge().radius * std::cos(a)),
+                    cvRound(cur.gauge().radius * std::sin(a))));
                 a = kPi / 4.0;
-                d.set_pt_max(d.gauge().center + cv::Point(
-                    cvRound(d.gauge().radius * std::cos(a)),
-                    cvRound(d.gauge().radius * std::sin(a))));
-                d.set_state(GaugeState::kCalibrating);
-                // Reset to first uncalibrated gauge for sequential calibration
-                size_t first = 0;
-                while (first < detectors_.size() && detectors_[first].scale().valid)
-                    first++;
-                if (first < detectors_.size())
-                    currentGaugeIdx_ = first;
+                cur.set_pt_max(cur.gauge().center + cv::Point(
+                    cvRound(cur.gauge().radius * std::cos(a)),
+                    cvRound(cur.gauge().radius * std::sin(a))));
+                cur.set_state(GaugeState::kCalibrating);
             }
-        } else if (d.state() == GaugeState::kCalibrating) {
-            int hit = d.HitTestMarker(cv::Point(x, y), d.gauge().radius);
+        }
+
+        // Hit-test markers on all gauges (against inset positions)
+        cv::Point click(x, y);
+        for (size_t i = 0; i < detectors_.size(); i++) {
+            auto& d = detectors_[i];
+            if (d.state() != GaugeState::kCalibrating) continue;
+            int thresh = std::max(d.gauge().radius / 6, 12);
+            cv::Point center = d.gauge().center;
+            cv::Point ptMinIn = center + (d.pt_min() - center) * 85 / 100;
+            cv::Point ptMaxIn = center + (d.pt_max() - center) * 85 / 100;
+            int dMin = cvRound(cv::norm(click - ptMinIn));
+            int dMax = cvRound(cv::norm(click - ptMaxIn));
+            int hit = GaugeDetector::kMarkerNone;
+            if (dMin <= thresh && dMin <= dMax)
+                hit = GaugeDetector::kMarkerMin;
+            else if (dMax <= thresh)
+                hit = GaugeDetector::kMarkerMax;
             if (hit != GaugeDetector::kMarkerNone) {
+                currentGaugeIdx_ = i;
                 draggingMarker_ = hit;
-                d.MoveMarkerToPerimeter(hit, cv::Point(x, y),
-                                        d.gauge().center, d.gauge().radius);
+                d.MoveMarkerToPerimeter(hit, click,
+                                        center, d.gauge().radius);
+                break;
             }
         }
 
@@ -258,12 +300,18 @@ void Worker::publishCalibrationDisplay() {
         return;
     }
 
+    QVector<GaugeCalibData> calib(detectors_.size());
+    for (size_t i = 0; i < detectors_.size(); i++) {
+        calib[i].value = 0;
+        calib[i].minValue = detectors_[i].scale().min_value;
+        calib[i].maxValue = detectors_[i].scale().max_value;
+        calib[i].colorRgb = bgrToRgb(detectors_[i].color());
+    }
+    emit gaugeCalibUpdated(calib);
+
     const auto& cur = detectors_[currentGaugeIdx_];
 
-    // Draw gauge circle if valid
-    if (cur.gauge().radius > 0) {
-        cv::circle(disp, cur.gauge().center, cur.gauge().radius, cur.color(), 2);
-    }
+    drawAllGauges(disp, detectors_, static_cast<int>(currentGaugeIdx_));
 
     // Circle manual placement
     if (cur.state() == GaugeState::kCircleManual) {
@@ -277,30 +325,46 @@ void Worker::publishCalibrationDisplay() {
         return;
     }
 
-    // Calibrating: draw both markers always
-    if (cur.state() == GaugeState::kCalibrating) {
-        cv::circle(disp, cur.gauge().center, 4, cv::Scalar(255, 255, 255), -1);
+    // Draw markers for all gauges that have them set
+    for (size_t i = 0; i < detectors_.size(); i++) {
+        const auto& d = detectors_[i];
+        if (d.state() != GaugeState::kCalibrating) continue;
+        if (d.pt_min() == cv::Point() && d.pt_max() == cv::Point()) continue;
 
-        // Arc from min to max
-        cv::Point vecMin = cur.pt_min() - cur.gauge().center;
-        cv::Point vecMax = cur.pt_max() - cur.gauge().center;
-        double angleMin = std::atan2(vecMin.y, vecMin.x);
-        double angleMax = std::atan2(vecMax.y, vecMax.x);
-        cv::ellipse(disp, cur.gauge().center,
-                    cv::Size(cur.gauge().radius, cur.gauge().radius),
-                    0, angleMin * 180.0 / kPi, angleMax * 180.0 / kPi,
-                    cv::Scalar(0, 255, 255), 2);
+        bool isCurrent = (static_cast<int>(i) == static_cast<int>(currentGaugeIdx_));
+        int thickness = isCurrent ? 2 : 1;
+        int arcR = cvRound(d.gauge().radius * 0.85);
 
-        // Min marker (green)
-        cv::circle(disp, cur.pt_min(), 10, cv::Scalar(0, 255, 0), -1);
-        cv::circle(disp, cur.pt_min(), 14, cv::Scalar(0, 255, 0), 2);
-        cv::putText(disp, "min", cur.pt_min() + cv::Point(12, 4),
+        cv::circle(disp, d.gauge().center, 4, cv::Scalar(255, 255, 255), -1);
+
+        cv::Point vecMin = d.pt_min() - d.gauge().center;
+        cv::Point vecMax = d.pt_max() - d.gauge().center;
+        cv::Point ptMinIn = d.gauge().center + vecMin * 85 / 100;
+        cv::Point ptMaxIn = d.gauge().center + vecMax * 85 / 100;
+
+        double a0 = std::atan2(vecMin.y, vecMin.x) * 180.0 / kPi;
+        double a1 = std::atan2(vecMax.y, vecMax.x) * 180.0 / kPi;
+        if (a0 < 0) a0 += 360;
+        if (a1 < 0) a1 += 360;
+        {
+            double cwEnd = (a1 > a0) ? a1 : a1 + 360;
+            bool cwTop = (a0 <= 270 && 270 <= cwEnd);
+            if (!cwTop) std::swap(a0, a1);
+        }
+        if (a1 <= a0) a1 += 360;
+        cv::ellipse(disp, d.gauge().center,
+                    cv::Size(arcR, arcR),
+                    0, a0, a1,
+                    cv::Scalar(0, 255, 255), thickness);
+
+        cv::circle(disp, ptMinIn, 10, cv::Scalar(0, 255, 0), -1);
+        cv::circle(disp, ptMinIn, 14, cv::Scalar(0, 255, 0), thickness);
+        cv::putText(disp, "min", ptMinIn + cv::Point(12, 4),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
 
-        // Max marker (red)
-        cv::circle(disp, cur.pt_max(), 10, cv::Scalar(0, 0, 255), -1);
-        cv::circle(disp, cur.pt_max(), 14, cv::Scalar(0, 0, 255), 2);
-        cv::putText(disp, "max", cur.pt_max() + cv::Point(12, 4),
+        cv::circle(disp, ptMaxIn, 10, cv::Scalar(0, 0, 255), -1);
+        cv::circle(disp, ptMaxIn, 14, cv::Scalar(0, 0, 255), thickness);
+        cv::putText(disp, "max", ptMaxIn + cv::Point(12, 4),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
     }
 
@@ -318,16 +382,19 @@ void Worker::startCalibration() {
     if (mode_ != AppMode::kCalibration || detectors_.empty()) return;
     currentGaugeIdx_ = 0;
     calibFrame_ = firstFrame_.clone();
-    auto& d = detectors_[0];
-    d.set_state(GaugeState::kCalibrating);
-    // Init marker defaults if not already set
-    if (d.gauge().radius > 0 && d.pt_min() == cv::Point() && d.pt_max() == cv::Point()) {
-        double a = 3.0 * kPi / 4.0;
-        d.set_pt_min(d.gauge().center + cv::Point(cvRound(d.gauge().radius * std::cos(a)),
-                                                   cvRound(d.gauge().radius * std::sin(a))));
-        a = kPi / 4.0;
-        d.set_pt_max(d.gauge().center + cv::Point(cvRound(d.gauge().radius * std::cos(a)),
-                                                   cvRound(d.gauge().radius * std::sin(a))));
+    for (auto& d : detectors_) {
+        d.set_state(GaugeState::kCalibrating);
+        if (d.gauge().radius > 0 &&
+            d.pt_min() == cv::Point() && d.pt_max() == cv::Point()) {
+            double a = 3.0 * kPi / 4.0;
+            d.set_pt_min(d.gauge().center + cv::Point(
+                cvRound(d.gauge().radius * std::cos(a)),
+                cvRound(d.gauge().radius * std::sin(a))));
+            a = kPi / 4.0;
+            d.set_pt_max(d.gauge().center + cv::Point(
+                cvRound(d.gauge().radius * std::cos(a)),
+                cvRound(d.gauge().radius * std::sin(a))));
+        }
     }
     std::cout << "  >> Starting calibration for "
               << detectors_.size() << " gauge(s)\n";
@@ -355,49 +422,29 @@ void Worker::confirmGauges() {
 void Worker::confirmCalib() {
     if (mode_ != AppMode::kCalibration || detectors_.empty()) return;
 
-    // Calibrate the first gauge that hasn't been calibrated yet
-    size_t idx = 0;
-    while (idx < detectors_.size() && detectors_[idx].scale().valid)
-        idx++;
-    if (idx >= detectors_.size()) {
-        enterProcessing();
-        return;
+    for (size_t i = 0; i < detectors_.size(); i++) {
+        auto& d = detectors_[i];
+        d.CalibrateFromPoints(d.pt_min(), d.pt_max());
+        d.SetCalibrationValid(true);
+        const auto& s = d.scale();
+        std::cout << "  >> Gauge " << i
+                  << " scale: " << s.min_value << " at "
+                  << (s.start_angle * 180.0 / kPi) << " deg, "
+                  << s.max_value << " at "
+                  << (s.end_angle * 180.0 / kPi) << " deg\n";
     }
+    enterProcessing();
+}
 
+void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
+    if (idx < 0 || idx >= static_cast<int>(detectors_.size())) return;
     auto& d = detectors_[idx];
-    d.CalibrateFromPoints(d.pt_min(), d.pt_max());
-    d.SetCalibrationValues(calibMinVal_, calibMaxVal_);
+    d.SetCalibrationValues(minVal, maxVal);
+    d.set_calib_track_min(static_cast<int>(minVal));
+    d.set_calib_track_max(static_cast<int>(maxVal));
     d.SetCalibrationValid(true);
-
-    const auto& s = d.scale();
-    std::cout << "  >> Gauge " << idx
-              << " scale: " << s.min_value << " at "
-              << (s.start_angle * 180.0 / kPi) << " deg, "
-              << s.max_value << " at "
-              << (s.end_angle * 180.0 / kPi) << " deg\n";
-
-    // Advance to the next uncalibrated gauge
-    size_t next = idx + 1;
-    while (next < detectors_.size() && detectors_[next].scale().valid)
-        next++;
-
-    if (next < detectors_.size()) {
-        currentGaugeIdx_ = next;
-        calibFrame_ = firstFrame_.clone();
-        detectors_[next].set_state(GaugeState::kCalibrating);
+    if (mode_ == AppMode::kCalibration)
         publishCalibrationDisplay();
-        emit calibUIUpdated(computeCalibUI());
-    } else {
-        enterProcessing();
-    }
-}
-
-void Worker::setCalibMin(int value) {
-    calibMinVal_ = value;
-}
-
-void Worker::setCalibMax(int value) {
-    calibMaxVal_ = value;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -420,6 +467,16 @@ void Worker::enterProcessing() {
     mode_ = AppMode::kProcessing;
     emit modeChanged(AppMode::kProcessing);
 
+    QVector<GaugeCalibData> calib(detectors_.size());
+    for (size_t i = 0; i < detectors_.size(); i++) {
+        auto& d = detectors_[i];
+        calib[i].value = d.GetSmoothedValue();
+        calib[i].minValue = d.scale().min_value;
+        calib[i].maxValue = d.scale().max_value;
+        calib[i].colorRgb = bgrToRgb(d.color());
+    }
+    emit gaugeCalibUpdated(calib);
+
     if (!processTimer_)
         processTimer_ = new QTimer(this);
     processTimer_->singleShot(0, this, &Worker::processNextFrame);
@@ -435,21 +492,28 @@ void Worker::processNextFrame() {
     }
 
     int labelY = 60;
-    for (auto& d : detectors_) {
+    for (size_t i = 0; i < detectors_.size(); i++) {
+        auto& d = detectors_[i];
         d.DetectNeedle(frame);
         d.DrawOverlay(frame, labelY);
+        drawGaugeNumber(frame, d.gauge().center,
+                        static_cast<int>(i + 1), d.color());
         labelY += 30;
     }
 
     if (writer_.isOpened()) writer_.write(frame);
     frameCount_++;
 
-    QVector<double> values(detectors_.size());
-    for (size_t i = 0; i < detectors_.size(); i++)
-        values[i] = detectors_[i].GetSmoothedValue();
+    QVector<GaugeCalibData> calib(detectors_.size());
+    for (size_t i = 0; i < detectors_.size(); i++) {
+        calib[i].value = detectors_[i].GetSmoothedValue();
+        calib[i].minValue = detectors_[i].scale().min_value;
+        calib[i].maxValue = detectors_[i].scale().max_value;
+        calib[i].colorRgb = bgrToRgb(detectors_[i].color());
+    }
 
     emit frameReady(matToQImage(frame));
-    emit gaugeValuesUpdated(values);
+    emit gaugeCalibUpdated(calib);
     emit frameCountUpdated(frameCount_, totalFrames_);
 
     QTimer::singleShot(0, this, &Worker::processNextFrame);

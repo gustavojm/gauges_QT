@@ -2,11 +2,21 @@
 
 #include <QWidget>
 #include <QVector>
-#include <vector>
+
+#include "Section.h"
+#include "worker.h"
 
 class QLabel;
 class QPushButton;
+class QSpinBox;
 class QVBoxLayout;
+class QScrollArea;
+
+struct GaugeSectionWidgets {
+    ui::Section* section = nullptr;
+    QSpinBox* minSpin = nullptr;
+    QSpinBox* maxSpin = nullptr;
+};
 
 class ProcessingPage : public QWidget {
     Q_OBJECT
@@ -16,16 +26,21 @@ public:
 
 public slots:
     void onFrameCountUpdated(int current, int total);
-    void onGaugeValuesUpdated(const QVector<double>& values);
+    void onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib);
 
 signals:
     void restartClicked();
     void quitClicked();
+    void gaugeCalibRangeChanged(int idx, double minVal, double maxVal);
 
 private:
+    void rebuildSections(const QVector<GaugeCalibData>& calib);
+
     QLabel* frameCountLabel_ = nullptr;
-    QVBoxLayout* gaugeValuesLayout_ = nullptr;
-    std::vector<QLabel*> gaugeValueLabels_;
+    QScrollArea* scrollArea_ = nullptr;
+    QWidget* scrollContent_ = nullptr;
+    QVBoxLayout* sectionsLayout_ = nullptr;
+    std::vector<GaugeSectionWidgets> sections_;
     QPushButton* restartBtn_ = nullptr;
     QPushButton* quitBtn_ = nullptr;
 };
