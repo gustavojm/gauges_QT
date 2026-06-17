@@ -4,3 +4,5 @@ build/
 .cache
 
 resources/
+
+vcpkg_installed/

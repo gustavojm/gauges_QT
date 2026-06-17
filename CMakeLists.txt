@@ -24,6 +24,12 @@ endif()
 add_executable(${PROJECT_NAME}
   src/main.cpp
   src/main_window.h
+  src/detection_page.cpp
+  src/detection_page.h
+  src/calibration_page.cpp
+  src/calibration_page.h
+  src/processing_page.cpp
+  src/processing_page.h
   src/gauge_detector.cpp
   src/gauge_detector.h
   src/worker.cpp
