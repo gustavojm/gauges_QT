@@ -1,8 +1,4 @@
 #include "main_window.h"
-#include "detection_page.h"
-#include "calibration_page.h"
-#include "processing_page.h"
-#include "worker.h"
 
 #include <QApplication>
 #include <QPainter>
@@ -150,41 +146,10 @@ MainWindow::MainWindow(const std::string& videoPath)
     connect(worker_, &Worker::finished,
             this, []() { QApplication::quit(); });
 
-    // Worker → Pages
-    connect(worker_, &Worker::detectionUpdated,
-            detectionPage_, &DetectionPage::onDetectionUpdated);
-    connect(worker_, &Worker::calibUIUpdated,
-            calibrationPage_, &CalibrationPage::onCalibUIUpdated);
-    connect(worker_, &Worker::manualPlacementActive,
-            detectionPage_, &DetectionPage::setManualPlacementActive);
-    connect(worker_, &Worker::gaugeValuesUpdated,
-            processingPage_, &ProcessingPage::onGaugeValuesUpdated);
-    connect(worker_, &Worker::frameCountUpdated,
-            processingPage_, &ProcessingPage::onFrameCountUpdated);
-
-    // Pages → Worker (cross-thread, auto-queued)
-    connect(detectionPage_, &DetectionPage::manualPlacementToggled,
-            worker_, &Worker::setManualPlacement);
-    connect(detectionPage_, &DetectionPage::cannyChanged,
-            worker_, &Worker::setCanny);
-    connect(detectionPage_, &DetectionPage::accChanged,
-            worker_, &Worker::setAcc);
-    connect(detectionPage_, &DetectionPage::confirmClicked,
-            worker_, &Worker::confirmGauges);
-    connect(calibrationPage_, &CalibrationPage::startCalibrationClicked,
-            worker_, &Worker::startCalibration);
-    connect(calibrationPage_, &CalibrationPage::confirmCalibClicked,
-            worker_, &Worker::confirmCalib);
-    connect(calibrationPage_, &CalibrationPage::cancelCalibClicked,
-            worker_, &Worker::quit);
-    connect(calibrationPage_, &CalibrationPage::minValChanged,
-            worker_, &Worker::setCalibMin);
-    connect(calibrationPage_, &CalibrationPage::maxValChanged,
-            worker_, &Worker::setCalibMax);
-    connect(processingPage_, &ProcessingPage::restartClicked,
-            worker_, &Worker::restart);
-    connect(processingPage_, &ProcessingPage::quitClicked,
-            worker_, &Worker::quit);
+    // Pages ↔ Worker
+    detectionPage_->connectToWorker(worker_);
+    calibrationPage_->connectToWorker(worker_);
+    processingPage_->connectToWorker(worker_);
 
     // Video → Worker
     connect(videoWidget_, &VideoWidget::mouseMoved,

@@ -1,4 +1,5 @@
 #include "detection_page.h"
+#include "worker.h"
 
 #include <QCheckBox>
 #include <QHBoxLayout>
@@ -80,4 +81,19 @@ void DetectionPage::onDetectionUpdated(size_t numGauges) {
 void DetectionPage::setManualPlacementActive(bool active) {
     cannyRow_->setVisible(!active);
     accRow_->setVisible(!active);
+}
+
+void DetectionPage::connectToWorker(Worker* worker) {
+    connect(this, &DetectionPage::manualPlacementToggled,
+            worker, &Worker::setManualPlacement);
+    connect(this, &DetectionPage::cannyChanged,
+            worker, &Worker::setCanny);
+    connect(this, &DetectionPage::accChanged,
+            worker, &Worker::setAcc);
+    connect(this, &DetectionPage::confirmClicked,
+            worker, &Worker::confirmGauges);
+    connect(worker, &Worker::detectionUpdated,
+            this, &DetectionPage::onDetectionUpdated);
+    connect(worker, &Worker::manualPlacementActive,
+            this, &DetectionPage::setManualPlacementActive);
 }

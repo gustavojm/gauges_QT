@@ -13,6 +13,7 @@ class DetectionPage : public QWidget {
     Q_OBJECT
 public:
     explicit DetectionPage(QWidget* parent = nullptr);
+    void connectToWorker(class Worker* worker);
 
 public slots:
     void onDetectionUpdated(size_t numGauges);

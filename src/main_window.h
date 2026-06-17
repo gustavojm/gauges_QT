@@ -1,26 +1,22 @@
 #pragma once
 
+#include <QCloseEvent>
 #include <QImage>
+#include <QKeyEvent>
+#include <QMouseEvent>
+#include <QPaintEvent>
 #include <QPixmap>
+#include <QResizeEvent>
+#include <QThread>
 #include <QWidget>
-#include <QString>
 
 #include <string>
 
 #include "gauge_detector.h"
-
-class QCloseEvent;
-class QKeyEvent;
-class QMouseEvent;
-class QPaintEvent;
-class QPixmap;
-class QResizeEvent;
-class QThread;
-
-class Worker;
-class DetectionPage;
-class CalibrationPage;
-class ProcessingPage;
+#include "worker.h"
+#include "detection_page.h"
+#include "calibration_page.h"
+#include "processing_page.h"
 
 // ─── Video Widget ─────────────────────────────────────────────────
 

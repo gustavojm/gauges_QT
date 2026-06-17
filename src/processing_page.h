@@ -12,6 +12,7 @@ class ProcessingPage : public QWidget {
     Q_OBJECT
 public:
     explicit ProcessingPage(QWidget* parent = nullptr);
+    void connectToWorker(class Worker* worker);
 
 public slots:
     void onFrameCountUpdated(int current, int total);

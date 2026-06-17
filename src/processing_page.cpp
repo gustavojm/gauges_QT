@@ -1,4 +1,5 @@
 #include "processing_page.h"
+#include "worker.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
@@ -66,4 +67,15 @@ void ProcessingPage::onGaugeValuesUpdated(const QVector<double>& values) {
             gaugeValueLabels_[i]->setVisible(false);
         }
     }
+}
+
+void ProcessingPage::connectToWorker(Worker* worker) {
+    connect(this, &ProcessingPage::restartClicked,
+            worker, &Worker::restart);
+    connect(this, &ProcessingPage::quitClicked,
+            worker, &Worker::quit);
+    connect(worker, &Worker::gaugeValuesUpdated,
+            this, &ProcessingPage::onGaugeValuesUpdated);
+    connect(worker, &Worker::frameCountUpdated,
+            this, &ProcessingPage::onFrameCountUpdated);
 }

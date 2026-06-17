@@ -1,4 +1,5 @@
 #include "calibration_page.h"
+#include "worker.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
@@ -133,4 +134,19 @@ void CalibrationPage::onCalibUIUpdated(const CalibUIState& calib) {
 
     if (calib.state != GaugeState::kCalibrating)
         calibConfirmInitialized_ = false;
+}
+
+void CalibrationPage::connectToWorker(Worker* worker) {
+    connect(this, &CalibrationPage::startCalibrationClicked,
+            worker, &Worker::startCalibration);
+    connect(this, &CalibrationPage::confirmCalibClicked,
+            worker, &Worker::confirmCalib);
+    connect(this, &CalibrationPage::cancelCalibClicked,
+            worker, &Worker::quit);
+    connect(this, &CalibrationPage::minValChanged,
+            worker, &Worker::setCalibMin);
+    connect(this, &CalibrationPage::maxValChanged,
+            worker, &Worker::setCalibMax);
+    connect(worker, &Worker::calibUIUpdated,
+            this, &CalibrationPage::onCalibUIUpdated);
 }

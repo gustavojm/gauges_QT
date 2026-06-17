@@ -12,6 +12,7 @@ class CalibrationPage : public QWidget {
     Q_OBJECT
 public:
     explicit CalibrationPage(QWidget* parent = nullptr);
+    void connectToWorker(class Worker* worker);
 
 public slots:
     void onCalibUIUpdated(const CalibUIState& state);
