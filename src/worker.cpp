@@ -325,22 +325,6 @@ void Worker::confirmGauges() {
     enterCalibration();
 }
 
-void Worker::addManual() {
-    if (mode_ != AppMode::kDetection) return;
-
-    if (manualPlacement_) {
-        // Toggle off — exit placement mode, show current gauges
-        manualPlacement_ = false;
-        manualPending_ = false;
-        std::cout << "  >> Manual placement stopped\n";
-    } else {
-        manualPlacement_ = true;
-        manualPending_ = false;
-        std::cout << "  >> Click center then edge to place manual gauge\n";
-    }
-    emit manualPlacementActive(manualPlacement_);
-}
-
 void Worker::confirmCalib() {
     if (mode_ != AppMode::kCalibration || detectors_.empty()) return;
 

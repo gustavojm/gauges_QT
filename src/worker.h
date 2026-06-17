@@ -36,7 +36,6 @@ public slots:
     void setCanny(int value);
     void setAcc(int value);
     void confirmGauges();
-    void addManual();
     void confirmCalib();
     void setCalibMin(int value);
     void setCalibMax(int value);
