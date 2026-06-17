@@ -12,6 +12,17 @@ constexpr int kNeedleThickness = 3;
 constexpr int kCalibPtRadius = 10;
 void GaugeDetector::SetCircle(const cv::Point& center, int radius) {
     gauge_ = {center, radius};
+    double a = 3.0 * kPi / 4.0;
+    pt_min_ = center + cv::Point(cvRound(radius * std::cos(a)),
+                                 cvRound(radius * std::sin(a)));
+    a = kPi / 4.0;
+    pt_max_ = center + cv::Point(cvRound(radius * std::cos(a)),
+                                 cvRound(radius * std::sin(a)));
+    state_ = GaugeState::kCalibrating;
+}
+
+void GaugeDetector::StartProcessing() {
+    state_ = GaugeState::kProcessing;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -326,17 +337,17 @@ cv::Scalar GaugeDetector::NextColor() {
 
 void GaugeDetector::HandleClick(int clickX, int clickY) {
     if (state() == GaugeState::kCircleManual) {
-        if (circle_stage() == 1) {
-            set_circle_center(cv::Point(clickX, clickY));
+        if (circle_stage_ == 1) {
+            circle_center_ = cv::Point(clickX, clickY);
             std::cout << "  >> Center at (" << clickX << ", " << clickY
                       << ")\n";
-            set_circle_stage(2);
-        } else if (circle_stage() == 2) {
+            circle_stage_ = 2;
+        } else if (circle_stage_ == 2) {
             int r =
                 cvRound(cv::norm(cv::Point(clickX, clickY) - circle_center()));
-            set_circle_radius(r);
+            circle_radius_ = r;
             std::cout << "  >> Radius set to " << r << "\n";
-            set_circle_stage(3);
+            circle_stage_ = 3;
         }
     }
 }

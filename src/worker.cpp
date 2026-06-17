@@ -93,8 +93,6 @@ CalibUIState Worker::computeCalibUI() const {
     calib.circleStage = d.circle_stage();
     calib.currentGauge = currentGaugeIdx_;
     calib.totalGauges = detectors_.size();
-    calib.calibTrackMin = d.calib_track_min();
-    calib.calibTrackMax = d.calib_track_max();
     return calib;
 }
 
@@ -229,15 +227,6 @@ void Worker::handleClick(int x, int y) {
                           << " at (" << g.center.x << ", " << g.center.y
                           << "), radius=" << g.radius << "\n";
                 calibFrame_ = firstFrame_.clone();
-                double a = 3.0 * kPi / 4.0;
-                cur.set_pt_min(cur.gauge().center + cv::Point(
-                    cvRound(cur.gauge().radius * std::cos(a)),
-                    cvRound(cur.gauge().radius * std::sin(a))));
-                a = kPi / 4.0;
-                cur.set_pt_max(cur.gauge().center + cv::Point(
-                    cvRound(cur.gauge().radius * std::cos(a)),
-                    cvRound(cur.gauge().radius * std::sin(a))));
-                cur.set_state(GaugeState::kCalibrating);
             }
         }
 
@@ -377,20 +366,6 @@ void Worker::startCalibration() {
     if (mode_ != AppMode::kCalibration || detectors_.empty()) return;
     currentGaugeIdx_ = 0;
     calibFrame_ = firstFrame_.clone();
-    for (auto& d : detectors_) {
-        d.set_state(GaugeState::kCalibrating);
-        if (d.gauge().radius > 0 &&
-            d.pt_min() == cv::Point() && d.pt_max() == cv::Point()) {
-            double a = 3.0 * kPi / 4.0;
-            d.set_pt_min(d.gauge().center + cv::Point(
-                cvRound(d.gauge().radius * std::cos(a)),
-                cvRound(d.gauge().radius * std::sin(a))));
-            a = kPi / 4.0;
-            d.set_pt_max(d.gauge().center + cv::Point(
-                cvRound(d.gauge().radius * std::cos(a)),
-                cvRound(d.gauge().radius * std::sin(a))));
-        }
-    }
     calibData_.resize(static_cast<int>(detectors_.size()));
     for (size_t i = 0; i < detectors_.size(); i++) {
         calibData_[i].value = 0;
@@ -444,8 +419,6 @@ void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
     if (idx < 0 || idx >= static_cast<int>(detectors_.size())) return;
     auto& d = detectors_[idx];
     d.SetCalibrationValues(minVal, maxVal);
-    d.set_calib_track_min(static_cast<int>(minVal));
-    d.set_calib_track_max(static_cast<int>(maxVal));
     d.SetCalibrationValid(true);
     if (mode_ == AppMode::kCalibration)
         publishCalibrationDisplay();
@@ -467,7 +440,7 @@ void Worker::enterProcessing() {
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
         std::cerr << "Warning: Could not reset to frame 0 in enterProcessing()\n";
     for (auto& d : detectors_)
-        d.set_state(GaugeState::kProcessing);
+        d.StartProcessing();
     frameCount_ = 0;
 
     mode_ = AppMode::kProcessing;

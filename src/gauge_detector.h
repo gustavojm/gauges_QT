@@ -52,17 +52,11 @@ public:
     void set_circle_radius(int r) { circle_radius_ = r; }
 
     const cv::Point& pt_min() const { return pt_min_; }
-    void set_pt_min(const cv::Point& pt) { pt_min_ = pt; }
     const cv::Point& pt_max() const { return pt_max_; }
-    void set_pt_max(const cv::Point& pt) { pt_max_ = pt; }
-
-    int calib_track_min() const { return calib_track_min_; }
-    void set_calib_track_min(int v) { calib_track_min_ = v; }
-    int calib_track_max() const { return calib_track_max_; }
-    void set_calib_track_max(int v) { calib_track_max_ = v; }
 
     // ─── Circle ─────────────────────────────────────────────────────
     void SetCircle(const cv::Point& center, int radius);
+    void StartProcessing();
 
     // ─── Needle Detection ───────────────────────────────────────────
     double DetectNeedle(const cv::Mat& frame);
@@ -123,8 +117,6 @@ private:
     cv::Point circle_center_;
     int circle_radius_ = 0;
     cv::Point pt_min_, pt_max_;
-    int calib_track_min_ = 0;
-    int calib_track_max_ = 1000;
 
     cv::Mat CreateMask(const cv::Mat& frame) const;
     double DetectColoredNeedle(const cv::Mat& frame) const;
@@ -149,8 +141,6 @@ struct CalibUIState {
     size_t currentGauge = 0;
     size_t totalGauges = 0;
     bool initialized = false;
-    int calibTrackMin = 0;
-    int calibTrackMax = 1000;
 };
 
 Q_DECLARE_METATYPE(CalibUIState)
