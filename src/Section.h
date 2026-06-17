@@ -33,6 +33,7 @@ namespace ui
     class Section : public QWidget
     {
         Q_OBJECT
+        Q_DISABLE_COPY_MOVE(Section)
         
     private:
         QGridLayout* mainLayout;
@@ -53,8 +54,8 @@ namespace ui
         // initialize section
         explicit Section(const QString& title = "", const int animationDuration = DEFAULT_DURATION, QWidget* parent = 0);
 
-        // set layout of content
-        void setContentLayout(QLayout& contentLayout);
+        // set layout of content (takes ownership)
+        void setContentLayout(QLayout* contentLayout);
         
         // set title
         void setTitle(QString title);

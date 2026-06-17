@@ -2,8 +2,6 @@
 
 #include <QWidget>
 
-#include <cstddef>
-
 class QCheckBox;
 class QSlider;
 class QLabel;
@@ -11,12 +9,14 @@ class QPushButton;
 
 class DetectionPage : public QWidget {
     Q_OBJECT
+    Q_DISABLE_COPY_MOVE(DetectionPage)
+    
 public:
     explicit DetectionPage(QWidget* parent = nullptr);
     void connectToWorker(class Worker* worker);
 
 public slots:
-    void onDetectionUpdated(size_t numGauges);
+    void onDetectionUpdated(int numGauges);
     void setManualPlacementActive(bool active);
 
 signals:

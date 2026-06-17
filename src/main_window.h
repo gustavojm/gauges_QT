@@ -22,6 +22,8 @@
 
 class VideoWidget : public QWidget {
     Q_OBJECT
+    Q_DISABLE_COPY_MOVE(VideoWidget)
+    
 public:
     explicit VideoWidget(QWidget* parent = nullptr);
     void setImage(const QImage& img);
@@ -48,6 +50,8 @@ private:
 
 class MainWindow : public QWidget {
     Q_OBJECT
+    Q_DISABLE_COPY_MOVE(MainWindow)
+
 public:
     explicit MainWindow(const std::string& videoPath);
     ~MainWindow() override;

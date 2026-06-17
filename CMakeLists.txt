@@ -36,6 +36,7 @@ add_executable(${PROJECT_NAME}
   src/worker.h
   src/Section.cpp
   src/Section.h
+  src/gauge_section_helper.h
 )
 
 list(APPEND CMAKE_PREFIX_PATH "/home/gustavo/vcpkg/installed/x64-linux")

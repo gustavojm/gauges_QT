@@ -3,23 +3,18 @@
 #include <QWidget>
 #include <QVector>
 
-#include "Section.h"
+#include "gauge_section_helper.h"
 #include "worker.h"
 
 class QLabel;
 class QPushButton;
-class QSpinBox;
 class QVBoxLayout;
 class QScrollArea;
 
-struct GaugeSectionWidgets {
-    ui::Section* section = nullptr;
-    QSpinBox* minSpin = nullptr;
-    QSpinBox* maxSpin = nullptr;
-};
-
 class ProcessingPage : public QWidget {
     Q_OBJECT
+    Q_DISABLE_COPY_MOVE(ProcessingPage)
+    
 public:
     explicit ProcessingPage(QWidget* parent = nullptr);
     void connectToWorker(class Worker* worker);

@@ -73,7 +73,7 @@ DetectionPage::DetectionPage(QWidget* parent)
     lay->addStretch();
 }
 
-void DetectionPage::onDetectionUpdated(size_t numGauges) {
+void DetectionPage::onDetectionUpdated(int numGauges) {
     gaugeCountLabel_->setText(QString("Found %1 gauge(s)").arg(numGauges));
     confirmBtn_->setVisible(numGauges > 0);
 }

@@ -75,13 +75,13 @@ namespace ui
         
         this->isExpanded = expanded;
         
-        qDebug() << "MV: toggle: isExpanded " << isExpanded;
+
     }
 
-    void Section::setContentLayout(QLayout& contentLayout)
+    void Section::setContentLayout(QLayout* contentLayout)
     {
         delete contentArea->layout();
-        contentArea->setLayout(&contentLayout);
+        contentArea->setLayout(contentLayout);
         collapsedHeight = sizeHint().height() - contentArea->maximumHeight();
         
         updateHeights();

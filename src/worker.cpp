@@ -1,7 +1,7 @@
 #include "worker.h"
 
+#include <QBasicTimer>
 #include <QThread>
-#include <QTimer>
 
 #include <iostream>
 
@@ -61,10 +61,6 @@ Worker::Worker(const std::string& videoPath, QObject* parent)
 }
 
 Worker::~Worker() {
-    if (processTimer_) {
-        processTimer_->stop();
-        delete processTimer_;
-    }
     cap_.release();
     if (writer_.isOpened()) writer_.release();
 }
@@ -84,6 +80,10 @@ QImage Worker::matToQImage(const cv::Mat& bgr) {
 CalibUIState Worker::computeCalibUI() const {
     CalibUIState calib;
     if (detectors_.empty()) {
+        calib.initialized = false;
+        return calib;
+    }
+    if (currentGaugeIdx_ >= detectors_.size()) {
         calib.initialized = false;
         return calib;
     }
@@ -123,24 +123,11 @@ void Worker::start() {
         emit finished();
         return;
     }
-    cap_.set(cv::CAP_PROP_POS_FRAMES, 0);
+    if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
+        std::cerr << "Warning: Could not reset to frame 0 in start()\n";
 
     detectedGauges_ = GaugeDetector::FindGauges(firstFrame_, canny_, acc_);
-    prevCanny_ = canny_;
-    prevAcc_ = acc_;
-
-    cv::Mat disp = firstFrame_.clone();
-    for (size_t i = 0; i < detectedGauges_.size(); i++) {
-        const auto& col = kPalette[i % kPalette.size()];
-        cv::circle(disp, detectedGauges_[i].center,
-                   detectedGauges_[i].radius, col, 2);
-        cv::putText(disp, std::to_string(detectedGauges_[i].radius),
-                    detectedGauges_[i].center + cv::Point(-20, 5),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
-    }
-
-    emit frameReady(matToQImage(disp));
-    emit detectionUpdated(detectedGauges_.size());
+    displayDetectionOverlay();
     emit modeChanged(AppMode::kDetection);
 }
 
@@ -148,11 +135,7 @@ void Worker::start() {
 //  Detection Mode
 // ═══════════════════════════════════════════════════════════════════
 
-void Worker::reRunDetection() {
-    detectedGauges_ = GaugeDetector::FindGauges(firstFrame_, canny_, acc_);
-    prevCanny_ = canny_;
-    prevAcc_ = acc_;
-
+void Worker::displayDetectionOverlay() {
     cv::Mat disp = firstFrame_.clone();
     for (size_t i = 0; i < detectedGauges_.size(); i++) {
         const auto& col = kPalette[i % kPalette.size()];
@@ -162,9 +145,13 @@ void Worker::reRunDetection() {
                     detectedGauges_[i].center + cv::Point(-20, 5),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
     }
-
     emit frameReady(matToQImage(disp));
     emit detectionUpdated(detectedGauges_.size());
+}
+
+void Worker::reRunDetection() {
+    detectedGauges_ = GaugeDetector::FindGauges(firstFrame_, canny_, acc_);
+    displayDetectionOverlay();
 }
 
 void Worker::setManualPlacement(bool enabled) {
@@ -229,7 +216,8 @@ void Worker::handleClick(int x, int y) {
         emit frameReady(matToQImage(disp));
         emit detectionUpdated(detectedGauges_.size());
 
-    } else if (mode_ == AppMode::kCalibration && !detectors_.empty()) {
+    } else if (mode_ == AppMode::kCalibration && !detectors_.empty() &&
+               currentGaugeIdx_ < detectors_.size()) {
         auto& cur = detectors_[currentGaugeIdx_];
         if (cur.state() == GaugeState::kCircleManual) {
             cur.HandleClick(x, y);
@@ -260,8 +248,12 @@ void Worker::handleClick(int x, int y) {
             if (d.state() != GaugeState::kCalibrating) continue;
             int thresh = std::max(d.gauge().radius / 6, 12);
             cv::Point center = d.gauge().center;
-            cv::Point ptMinIn = center + (d.pt_min() - center) * 85 / 100;
-            cv::Point ptMaxIn = center + (d.pt_max() - center) * 85 / 100;
+            cv::Point vecMin = d.pt_min() - center;
+            cv::Point vecMax = d.pt_max() - center;
+            cv::Point ptMinIn = center + cv::Point(
+                cvRound(vecMin.x * kRadiusInset), cvRound(vecMin.y * kRadiusInset));
+            cv::Point ptMaxIn = center + cv::Point(
+                cvRound(vecMax.x * kRadiusInset), cvRound(vecMax.y * kRadiusInset));
             int dMin = cvRound(cv::norm(click - ptMinIn));
             int dMax = cvRound(cv::norm(click - ptMaxIn));
             int hit = GaugeDetector::kMarkerNone;
@@ -295,19 +287,10 @@ void Worker::publishCalibrationDisplay() {
         disp = firstFrame_.clone();
     }
 
-    if (detectors_.empty()) {
+    if (detectors_.empty() || currentGaugeIdx_ >= detectors_.size()) {
         emit frameReady(matToQImage(disp));
         return;
     }
-
-    QVector<GaugeCalibData> calib(detectors_.size());
-    for (size_t i = 0; i < detectors_.size(); i++) {
-        calib[i].value = 0;
-        calib[i].minValue = detectors_[i].scale().min_value;
-        calib[i].maxValue = detectors_[i].scale().max_value;
-        calib[i].colorRgb = bgrToRgb(detectors_[i].color());
-    }
-    emit gaugeCalibUpdated(calib);
 
     const auto& cur = detectors_[currentGaugeIdx_];
 
@@ -333,14 +316,16 @@ void Worker::publishCalibrationDisplay() {
 
         bool isCurrent = (static_cast<int>(i) == static_cast<int>(currentGaugeIdx_));
         int thickness = isCurrent ? 2 : 1;
-        int arcR = cvRound(d.gauge().radius * 0.85);
+        int arcR = cvRound(d.gauge().radius * kRadiusInset);
 
         cv::circle(disp, d.gauge().center, 4, cv::Scalar(255, 255, 255), -1);
 
         cv::Point vecMin = d.pt_min() - d.gauge().center;
         cv::Point vecMax = d.pt_max() - d.gauge().center;
-        cv::Point ptMinIn = d.gauge().center + vecMin * 85 / 100;
-        cv::Point ptMaxIn = d.gauge().center + vecMax * 85 / 100;
+        cv::Point ptMinIn = d.gauge().center + cv::Point(
+            cvRound(vecMin.x * kRadiusInset), cvRound(vecMin.y * kRadiusInset));
+        cv::Point ptMaxIn = d.gauge().center + cv::Point(
+            cvRound(vecMax.x * kRadiusInset), cvRound(vecMax.y * kRadiusInset));
 
         double a0 = std::atan2(vecMin.y, vecMin.x) * 180.0 / kPi;
         double a1 = std::atan2(vecMax.y, vecMax.x) * 180.0 / kPi;
@@ -374,6 +359,16 @@ void Worker::publishCalibrationDisplay() {
 void Worker::enterCalibration() {
     mode_ = AppMode::kCalibration;
     emit modeChanged(AppMode::kCalibration);
+
+    calibData_.resize(static_cast<int>(detectors_.size()));
+    for (size_t i = 0; i < detectors_.size(); i++) {
+        calibData_[i].value = 0;
+        calibData_[i].minValue = detectors_[i].scale().min_value;
+        calibData_[i].maxValue = detectors_[i].scale().max_value;
+        calibData_[i].colorRgb = bgrToRgb(detectors_[i].color());
+    }
+    emit gaugeCalibUpdated(calibData_);
+
     publishCalibrationDisplay();
     emit calibUIUpdated(computeCalibUI());
 }
@@ -396,6 +391,15 @@ void Worker::startCalibration() {
                 cvRound(d.gauge().radius * std::sin(a))));
         }
     }
+    calibData_.resize(static_cast<int>(detectors_.size()));
+    for (size_t i = 0; i < detectors_.size(); i++) {
+        calibData_[i].value = 0;
+        calibData_[i].minValue = detectors_[i].scale().min_value;
+        calibData_[i].maxValue = detectors_[i].scale().max_value;
+        calibData_[i].colorRgb = bgrToRgb(detectors_[i].color());
+    }
+    emit gaugeCalibUpdated(calibData_);
+
     std::cout << "  >> Starting calibration for "
               << detectors_.size() << " gauge(s)\n";
     publishCalibrationDisplay();
@@ -407,7 +411,7 @@ void Worker::confirmGauges() {
         return;
 
     detectors_.clear();
-    for (auto& g : detectedGauges_) {
+    for (const auto& g : detectedGauges_) {
         detectors_.emplace_back(g.center, g.radius, GaugeDetector::NextColor());
         std::cout << "  >> Gauge " << (detectors_.size() - 1)
                   << " at (" << g.center.x << ", " << g.center.y
@@ -455,11 +459,13 @@ void Worker::enterProcessing() {
     std::string outputPath =
         videoPath_.substr(0, videoPath_.find_last_of('.')) + "_output.avi";
     int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-    writer_.open(outputPath, fourcc, fps_, firstFrame_.size());
-    if (writer_.isOpened())
+    if (!writer_.open(outputPath, fourcc, fps_, firstFrame_.size()))
+        std::cerr << "Warning: Could not open output video\n";
+    else
         std::cout << "  >> Output: " << outputPath << "\n";
 
-    cap_.set(cv::CAP_PROP_POS_FRAMES, 0);
+    if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
+        std::cerr << "Warning: Could not reset to frame 0 in enterProcessing()\n";
     for (auto& d : detectors_)
         d.set_state(GaugeState::kProcessing);
     frameCount_ = 0;
@@ -467,27 +473,27 @@ void Worker::enterProcessing() {
     mode_ = AppMode::kProcessing;
     emit modeChanged(AppMode::kProcessing);
 
-    QVector<GaugeCalibData> calib(detectors_.size());
+    calibData_.resize(static_cast<int>(detectors_.size()));
     for (size_t i = 0; i < detectors_.size(); i++) {
         auto& d = detectors_[i];
-        calib[i].value = d.GetSmoothedValue();
-        calib[i].minValue = d.scale().min_value;
-        calib[i].maxValue = d.scale().max_value;
-        calib[i].colorRgb = bgrToRgb(d.color());
+        calibData_[i].value = d.GetSmoothedValue();
+        calibData_[i].minValue = d.scale().min_value;
+        calibData_[i].maxValue = d.scale().max_value;
+        calibData_[i].colorRgb = bgrToRgb(d.color());
     }
-    emit gaugeCalibUpdated(calib);
-
-    if (!processTimer_)
-        processTimer_ = new QTimer(this);
-    processTimer_->singleShot(0, this, &Worker::processNextFrame);
+    emit gaugeCalibUpdated(calibData_);
+   
+    chainTimer_.start(0, this);
 }
 
 void Worker::processNextFrame() {
+    chainTimer_.stop();
     if (quit_ || mode_ != AppMode::kProcessing) return;
 
     cv::Mat frame;
     if (!cap_.read(frame)) {
         std::cout << "End of video.\n";
+        emit finished();
         return;
     }
 
@@ -504,27 +510,38 @@ void Worker::processNextFrame() {
     if (writer_.isOpened()) writer_.write(frame);
     frameCount_++;
 
-    QVector<GaugeCalibData> calib(detectors_.size());
+    calibData_.resize(static_cast<int>(detectors_.size()));
     for (size_t i = 0; i < detectors_.size(); i++) {
-        calib[i].value = detectors_[i].GetSmoothedValue();
-        calib[i].minValue = detectors_[i].scale().min_value;
-        calib[i].maxValue = detectors_[i].scale().max_value;
-        calib[i].colorRgb = bgrToRgb(detectors_[i].color());
+        calibData_[i].value = detectors_[i].GetSmoothedValue();
+        calibData_[i].minValue = detectors_[i].scale().min_value;
+        calibData_[i].maxValue = detectors_[i].scale().max_value;
+        calibData_[i].colorRgb = bgrToRgb(detectors_[i].color());
     }
 
     emit frameReady(matToQImage(frame));
-    emit gaugeCalibUpdated(calib);
+    emit gaugeCalibUpdated(calibData_);
     emit frameCountUpdated(frameCount_, totalFrames_);
 
-    QTimer::singleShot(0, this, &Worker::processNextFrame);
+    chainTimer_.start(0, this);
 }
 
 void Worker::restart() {
+    chainTimer_.stop();
     if (mode_ != AppMode::kProcessing) return;
-    cap_.set(cv::CAP_PROP_POS_FRAMES, 0);
+    if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
+        std::cerr << "Warning: Could not reset to frame 0 in restart()\n";
     for (auto& d : detectors_) d.ResetSmoothing();
     frameCount_ = 0;
-    QTimer::singleShot(0, this, &Worker::processNextFrame);
+    chainTimer_.start(0, this);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Timer
+// ═══════════════════════════════════════════════════════════════════
+
+void Worker::timerEvent(QTimerEvent* event) {
+    if (event->timerId() == chainTimer_.timerId())
+        processNextFrame();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -553,6 +570,7 @@ void Worker::handleDragRelease() {
 // ═══════════════════════════════════════════════════════════════════
 
 void Worker::quit() {
+    chainTimer_.stop();
     quit_ = true;
     cap_.release();
     if (writer_.isOpened()) writer_.release();

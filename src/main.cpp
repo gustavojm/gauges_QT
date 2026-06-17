@@ -131,6 +131,7 @@ MainWindow::MainWindow(const std::string& videoPath)
     mainLayout->addWidget(controlPanel);
 
     // ── Register meta-types ─────────────────────────────────────
+    qRegisterMetaType<AppMode>();
     qRegisterMetaType<CalibUIState>();
     qRegisterMetaType<QVector<GaugeCalibData>>();
 
@@ -170,12 +171,6 @@ MainWindow::MainWindow(const std::string& videoPath)
             worker_, &Worker::handleDragRelease);
     connect(videoWidget_, &VideoWidget::imageClicked,
             worker_, &Worker::handleClick);
-
-    connect(this, &MainWindow::quitRequested,
-            worker_, &Worker::quit);
-
-    connect(workerThread_, &QThread::started,
-            worker_, &Worker::start);
 
     // ── Start worker thread ─────────────────────────────────────
     workerThread_->start();

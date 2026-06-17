@@ -1,27 +1,20 @@
 #pragma once
 
-#include <QVector>
 #include <QWidget>
-#include <vector>
 
-#include "Section.h"
+#include "gauge_section_helper.h"
 #include "gauge_detector.h"
 #include "worker.h"
 
 class QLabel;
 class QPushButton;
 class QScrollArea;
-class QSpinBox;
 class QVBoxLayout;
-
-struct CalibGaugeSection {
-    ui::Section* section = nullptr;
-    QSpinBox* minSpin = nullptr;
-    QSpinBox* maxSpin = nullptr;
-};
 
 class CalibrationPage : public QWidget {
     Q_OBJECT
+    Q_DISABLE_COPY_MOVE(CalibrationPage)
+    
 public:
     explicit CalibrationPage(QWidget* parent = nullptr);
     void connectToWorker(class Worker* worker);
@@ -45,7 +38,7 @@ private:
     QScrollArea* scrollArea_ = nullptr;
     QWidget* scrollContent_ = nullptr;
     QVBoxLayout* sectionsLayout_ = nullptr;
-    std::vector<CalibGaugeSection> sections_;
+    std::vector<GaugeSectionWidgets> sections_;
     QPushButton* confirmCalibBtn_ = nullptr;
     QPushButton* cancelCalibBtn_ = nullptr;
     int currentGaugeIdx_ = 0;

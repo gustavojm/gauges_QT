@@ -21,6 +21,7 @@ struct ScaleCalibration {
 inline constexpr double kPi = 3.14159265358979323846;
 inline constexpr int kManualCenterRadius = 5;
 inline constexpr int kManualGuideRadius = 30;
+inline constexpr double kRadiusInset = 0.85;
 
 enum class GaugeState {
     kInit,
@@ -139,6 +140,8 @@ private:
 // ─── Shared Types ─────────────────────────────────────────────────
 
 enum class AppMode { kDetection, kCalibration, kProcessing };
+
+Q_DECLARE_METATYPE(AppMode)
 
 struct CalibUIState {
     GaugeState state = GaugeState::kInit;

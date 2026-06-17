@@ -1,11 +1,14 @@
 #pragma once
 
+#include <QBasicTimer>
 #include <QImage>
 #include <QObject>
+#include <QTimerEvent>
 #include <QVector>
 
 #include <opencv2/opencv.hpp>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -18,10 +21,12 @@ struct GaugeCalibData {
     uint32_t colorRgb = 0x00FF00;
 };
 
-class QTimer;
+Q_DECLARE_METATYPE(GaugeCalibData)
 
 class Worker : public QObject {
     Q_OBJECT
+    Q_DISABLE_COPY_MOVE(Worker)
+    
 public:
     explicit Worker(const std::string& videoPath, QObject* parent = nullptr);
     ~Worker() override;
@@ -30,7 +35,7 @@ signals:
     void frameReady(const QImage& image);
     void gaugeCalibUpdated(const QVector<GaugeCalibData>& calib);
     void frameCountUpdated(int current, int total);
-    void detectionUpdated(size_t numGauges);
+    void detectionUpdated(int numGauges);
     void calibUIUpdated(const CalibUIState& state);
     void modeChanged(AppMode mode);
     void manualPlacementActive(bool active);
@@ -55,8 +60,11 @@ private slots:
     void processNextFrame();
 
 private:
+    void timerEvent(QTimerEvent* event) override;
+
     CalibUIState computeCalibUI() const;
-    QImage matToQImage(const cv::Mat& bgr);
+    static QImage matToQImage(const cv::Mat& bgr);
+    void displayDetectionOverlay();
     void reRunDetection();
     void publishCalibrationDisplay();
     void enterCalibration();
@@ -72,8 +80,6 @@ private:
     std::vector<GaugeDetector> detectors_;
     std::vector<GaugeROI> detectedGauges_;
     size_t currentGaugeIdx_ = 0;
-    int prevCanny_ = -1;
-    int prevAcc_ = -1;
     bool manualPending_ = false;
     cv::Point manualCenter_;
     cv::VideoWriter writer_;
@@ -87,5 +93,7 @@ private:
     bool quit_ = false;
     int draggingMarker_ = GaugeDetector::kMarkerNone;
 
-    QTimer* processTimer_ = nullptr;
+    QBasicTimer chainTimer_;
+    QVector<GaugeCalibData> calibData_;
+
 };

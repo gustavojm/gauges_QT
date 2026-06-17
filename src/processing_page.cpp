@@ -1,10 +1,11 @@
 #include "processing_page.h"
 
+#include "Section.h"
+
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QScrollArea>
-#include <QSpinBox>
 #include <QVBoxLayout>
 
 namespace {
@@ -50,64 +51,7 @@ ProcessingPage::ProcessingPage(QWidget* parent)
 }
 
 void ProcessingPage::rebuildSections(const QVector<GaugeCalibData>& calib) {
-    while (!sections_.empty()) {
-        auto& s = sections_.back();
-        sectionsLayout_->removeWidget(s.section);
-        delete s.section;
-        sections_.pop_back();
-    }
-
-    for (int i = 0; i < calib.size(); i++) {
-        QString colorName = QString("#%1").arg(calib[i].colorRgb, 6, 16, QChar('0'));
-        auto* sec = new ui::Section(
-            QString("Gauge %1: %2").arg(i + 1).arg(calib[i].value, 0, 'f', 2),
-            0, scrollContent_);
-        sec->setStyleSheet(
-            QString("ui--Section { background: #2a2a32; border-radius: 4px; }"
-                    "ui--Section QToolButton { color: %1; }")
-                .arg(colorName));
-
-        auto* cl = new QVBoxLayout();
-        cl->setContentsMargins(8, 4, 8, 8);
-        cl->setSpacing(6);
-
-        auto* minRow = new QWidget();
-        auto* minLay = new QHBoxLayout(minRow);
-        minLay->setContentsMargins(0, 0, 0, 0);
-        minLay->addWidget(new QLabel("Min:"));
-        auto* minSpin = new QSpinBox();
-        minSpin->setRange(0, 10000);
-        minSpin->setValue(static_cast<int>(calib[i].minValue));
-        minLay->addWidget(minSpin, 1);
-        cl->addWidget(minRow);
-
-        auto* maxRow = new QWidget();
-        auto* maxLay = new QHBoxLayout(maxRow);
-        maxLay->setContentsMargins(0, 0, 0, 0);
-        maxLay->addWidget(new QLabel("Max:"));
-        auto* maxSpin = new QSpinBox();
-        maxSpin->setRange(0, 10000);
-        maxSpin->setValue(static_cast<int>(calib[i].maxValue));
-        maxLay->addWidget(maxSpin, 1);
-        cl->addWidget(maxRow);
-
-        sec->setContentLayout(*cl);
-        sectionsLayout_->addWidget(sec);
-
-        connect(minSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
-                [this, i](int v) {
-                    emit gaugeCalibRangeChanged(i, static_cast<double>(v),
-                                                sections_[i].maxSpin->value());
-                });
-        connect(maxSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
-                [this, i](int v) {
-                    emit gaugeCalibRangeChanged(i,
-                                                sections_[i].minSpin->value(),
-                                                static_cast<double>(v));
-                });
-
-        sections_.push_back({sec, minSpin, maxSpin});
-    }
+    ::rebuildGaugeSections(sections_, sectionsLayout_, scrollContent_, calib, this);
 }
 
 void ProcessingPage::onFrameCountUpdated(int current, int total) {

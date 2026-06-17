@@ -275,20 +275,17 @@ void GaugeDetector::DrawOverlay(cv::Mat& frame, int labelY) const {
         cv::circle(frame, gauge_.center, gauge_.radius, color_,
                    kCircleThickness);
         if (scale_.valid) {
+            int arcR = cvRound(gauge_.radius * kRadiusInset);
             cv::Point startPt(
-                gauge_.center.x + cvRound(gauge_.radius * 0.85 *
-                                          std::cos(scale_.start_angle)),
-                gauge_.center.y + cvRound(gauge_.radius * 0.85 *
-                                          std::sin(scale_.start_angle)));
+                gauge_.center.x + cvRound(arcR * std::cos(scale_.start_angle)),
+                gauge_.center.y + cvRound(arcR * std::sin(scale_.start_angle)));
             cv::line(frame, gauge_.center, startPt, cv::Scalar(0, 255, 0), 2);
             cv::putText(frame, std::to_string((int)scale_.min_value),
                         startPt + cv::Point(10, 0), cv::FONT_HERSHEY_SIMPLEX,
                         0.6, cv::Scalar(0, 255, 0), 2);
             cv::Point endPt(
-                gauge_.center.x +
-                    cvRound(gauge_.radius * 0.85 * std::cos(scale_.end_angle)),
-                gauge_.center.y +
-                    cvRound(gauge_.radius * 0.85 * std::sin(scale_.end_angle)));
+                gauge_.center.x + cvRound(arcR * std::cos(scale_.end_angle)),
+                gauge_.center.y + cvRound(arcR * std::sin(scale_.end_angle)));
             cv::line(frame, gauge_.center, endPt, cv::Scalar(0, 0, 255), 2);
             cv::putText(frame, std::to_string((int)scale_.max_value),
                         endPt + cv::Point(10, 0), cv::FONT_HERSHEY_SIMPLEX, 0.6,
