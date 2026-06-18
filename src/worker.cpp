@@ -26,26 +26,11 @@ void drawDashedCircle(cv::Mat& img, cv::Point center, int radius,
     }
 }
 
-void drawGaugeNumber(cv::Mat& img, cv::Point center, int number,
-                     cv::Scalar color) {
-    cv::putText(img, std::to_string(number),
-                center - cv::Point(8, 8),
-                cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
-}
-
 void drawAllGauges(cv::Mat& img,
                    const std::vector<GaugeDetector>& detectors,
                    int highlightIdx = -1) {
-    for (size_t i = 0; i < detectors.size(); i++) {
-        const auto& d = detectors[i];
-        if (d.gauge().radius <= 0) continue;
-        cv::Scalar color = (static_cast<int>(i) == highlightIdx)
-                               ? cv::Scalar(0, 255, 255)
-                               : d.color();
-        cv::circle(img, d.gauge().center, d.gauge().radius, color, 2);
-        drawGaugeNumber(img, d.gauge().center, static_cast<int>(i + 1),
-                        color);
-    }
+    for (size_t i = 0; i < detectors.size(); i++)
+        detectors[i].DrawOutline(img, static_cast<int>(i) == highlightIdx);
 }
 
 } // namespace
@@ -90,7 +75,6 @@ CalibUIState Worker::computeCalibUI() const {
     const auto& d = detectors_[currentGaugeIdx_];
     calib.initialized = true;
     calib.state = d.state();
-    calib.circleStage = d.circle_stage();
     calib.currentGauge = currentGaugeIdx_;
     calib.totalGauges = detectors_.size();
     return calib;
@@ -157,6 +141,7 @@ void Worker::setManualPlacement(bool enabled) {
     if (!enabled && mode_ == AppMode::kDetection)
         reRunDetection();
     emit manualPlacementActive(enabled);
+    emit manualInstructionChanged(enabled);
 }
 
 void Worker::setCanny(int value) {
@@ -195,67 +180,29 @@ void Worker::handleClick(int x, int y) {
         for (size_t i = 0; i < detectedGauges_.size(); i++) {
             const auto& g = detectedGauges_[i];
             cv::circle(disp, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
-            drawGaugeNumber(disp, g.center, static_cast<int>(i + 1),
-                            cv::Scalar(0, 255, 0));
+            cv::putText(disp, std::to_string(i + 1),
+                        g.center - cv::Point(8, 8),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
         }
         cv::circle(disp, manualCenter_, kManualCenterRadius,
                    cv::Scalar(0, 255, 255), -1);
         drawDashedCircle(disp, manualCenter_, kManualGuideRadius,
                          cv::Scalar(0, 255, 255), 1);
-        if (manualPending_) {
-            cv::putText(disp, "Now click on the EDGE of the gauge face",
-                        cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX,
-                        1.0, cv::Scalar(0, 255, 255), 2);
-        } else {
-            cv::putText(disp, "Click on the CENTER of the gauge",
-                        cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX,
-                        1.0, cv::Scalar(0, 255, 255), 2);
-        }
+        emit manualInstructionChanged(!manualPending_);
         emit frameReady(matToQImage(disp));
         emit detectionUpdated(detectedGauges_.size());
 
     } else if (mode_ == AppMode::kCalibration && !detectors_.empty() &&
                currentGaugeIdx_ < detectors_.size()) {
-        auto& cur = detectors_[currentGaugeIdx_];
-        if (cur.state() == GaugeState::kCircleManual) {
-            cur.HandleClick(x, y);
-            if (cur.circle_stage() == 3 && cur.circle_radius() > 0 &&
-                cur.gauge().radius == 0) {
-                cur.SetCircle(cur.circle_center(), cur.circle_radius());
-                const auto& g = cur.gauge();
-                std::cout << "  >> Gauge " << currentGaugeIdx_
-                          << " at (" << g.center.x << ", " << g.center.y
-                          << "), radius=" << g.radius << "\n";
-                calibFrame_ = firstFrame_.clone();
-            }
-        }
+        // Handle state transitions for the current gauge (e.g. circle placement)
+        detectors_[currentGaugeIdx_].HandleClick(x, y);
 
-        // Hit-test markers on all gauges (against inset positions)
-        cv::Point click(x, y);
+        // Hit-test markers on all gauges and start drag if a marker was hit
         for (size_t i = 0; i < detectors_.size(); i++) {
-            auto& d = detectors_[i];
-            if (d.state() != GaugeState::kCalibrating) continue;
-            int thresh = std::max(d.gauge().radius / 6, 12);
-            cv::Point center = d.gauge().center;
-            cv::Point vecMin = d.pt_min() - center;
-            cv::Point vecMax = d.pt_max() - center;
-            cv::Point ptMinIn = center + cv::Point(
-                cvRound(vecMin.x * kRadiusInset), cvRound(vecMin.y * kRadiusInset));
-            cv::Point ptMaxIn = center + cv::Point(
-                cvRound(vecMax.x * kRadiusInset), cvRound(vecMax.y * kRadiusInset));
-            int dMin = cvRound(cv::norm(click - ptMinIn));
-            int dMax = cvRound(cv::norm(click - ptMaxIn));
-            int hit = GaugeDetector::kMarkerNone;
-            if (dMin <= thresh && dMin <= dMax)
-                hit = GaugeDetector::kMarkerMin;
-            else if (dMax <= thresh)
-                hit = GaugeDetector::kMarkerMax;
+            int hit = detectors_[i].HandleClick(x, y);
             if (hit != GaugeDetector::kMarkerNone) {
                 currentGaugeIdx_ = i;
                 draggingMarker_ = hit;
-                d.MoveMarkerToPerimeter(hit, click,
-                                        center, d.gauge().radius);
-                break;
             }
         }
 
@@ -281,65 +228,11 @@ void Worker::publishCalibrationDisplay() {
         return;
     }
 
-    const auto& cur = detectors_[currentGaugeIdx_];
-
     drawAllGauges(disp, detectors_, static_cast<int>(currentGaugeIdx_));
 
-    // Circle manual placement
-    if (cur.state() == GaugeState::kCircleManual) {
-        if (cur.circle_stage() == 2) {
-            cv::circle(disp, cur.circle_center(), kManualCenterRadius,
-                       cv::Scalar(0, 255, 0), -1);
-            drawDashedCircle(disp, cur.circle_center(), kManualGuideRadius,
-                             cv::Scalar(0, 255, 0), 1);
-        }
-        emit frameReady(matToQImage(disp));
-        return;
-    }
-
-    // Draw markers for all gauges that have them set
+    // Draw calibration markers for all gauges
     for (size_t i = 0; i < detectors_.size(); i++) {
-        const auto& d = detectors_[i];
-        if (d.state() != GaugeState::kCalibrating) continue;
-        if (d.pt_min() == cv::Point() && d.pt_max() == cv::Point()) continue;
-
-        bool isCurrent = (static_cast<int>(i) == static_cast<int>(currentGaugeIdx_));
-        int thickness = isCurrent ? 2 : 1;
-        int arcR = cvRound(d.gauge().radius * kRadiusInset);
-
-        cv::circle(disp, d.gauge().center, 4, cv::Scalar(255, 255, 255), -1);
-
-        cv::Point vecMin = d.pt_min() - d.gauge().center;
-        cv::Point vecMax = d.pt_max() - d.gauge().center;
-        cv::Point ptMinIn = d.gauge().center + cv::Point(
-            cvRound(vecMin.x * kRadiusInset), cvRound(vecMin.y * kRadiusInset));
-        cv::Point ptMaxIn = d.gauge().center + cv::Point(
-            cvRound(vecMax.x * kRadiusInset), cvRound(vecMax.y * kRadiusInset));
-
-        double a0 = std::atan2(vecMin.y, vecMin.x) * 180.0 / kPi;
-        double a1 = std::atan2(vecMax.y, vecMax.x) * 180.0 / kPi;
-        if (a0 < 0) a0 += 360;
-        if (a1 < 0) a1 += 360;
-        {
-            double cwEnd = (a1 > a0) ? a1 : a1 + 360;
-            bool cwTop = (a0 <= 270 && 270 <= cwEnd);
-            if (!cwTop) std::swap(a0, a1);
-        }
-        if (a1 <= a0) a1 += 360;
-        cv::ellipse(disp, d.gauge().center,
-                    cv::Size(arcR, arcR),
-                    0, a0, a1,
-                    cv::Scalar(0, 255, 255), thickness);
-
-        cv::circle(disp, ptMinIn, 10, cv::Scalar(0, 255, 0), -1);
-        cv::circle(disp, ptMinIn, 14, cv::Scalar(0, 255, 0), thickness);
-        cv::putText(disp, "min", ptMinIn + cv::Point(12, 4),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-
-        cv::circle(disp, ptMaxIn, 10, cv::Scalar(0, 0, 255), -1);
-        cv::circle(disp, ptMaxIn, 14, cv::Scalar(0, 0, 255), thickness);
-        cv::putText(disp, "max", ptMaxIn + cv::Point(12, 4),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+        detectors_[i].DrawCalibrationOverlay(disp, i == currentGaugeIdx_);
     }
 
     emit frameReady(matToQImage(disp));
@@ -475,8 +368,7 @@ void Worker::processNextFrame() {
         auto& d = detectors_[i];
         d.DetectNeedle(frame);
         d.DrawOverlay(frame, labelY);
-        drawGaugeNumber(frame, d.gauge().center,
-                        static_cast<int>(i + 1), d.color());
+        d.DrawGaugeNumber(frame);
         labelY += 30;
     }
 
@@ -529,8 +421,7 @@ void Worker::handleDragMove(int x, int y) {
     auto& d = detectors_[currentGaugeIdx_];
     if (d.state() != GaugeState::kCalibrating) return;
 
-    d.MoveMarkerToPerimeter(draggingMarker_, cv::Point(x, y),
-                            d.gauge().center, d.gauge().radius);
+    d.MoveMarkerToPerimeter(draggingMarker_, cv::Point(x, y));
     publishCalibrationDisplay();
 }
 

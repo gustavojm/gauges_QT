@@ -18,6 +18,7 @@ public:
 public slots:
     void onDetectionUpdated(int numGauges);
     void setManualPlacementActive(bool active);
+    void onManualInstructionChanged(bool centerStage);
 
 signals:
     void manualPlacementToggled(bool checked);
@@ -34,5 +35,6 @@ private:
     QSlider* accSlider_ = nullptr;
     QLabel* accValLabel_ = nullptr;
     QLabel* gaugeCountLabel_ = nullptr;
+    QLabel* instructionLabel_ = nullptr;
     QPushButton* confirmBtn_ = nullptr;
 };

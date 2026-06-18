@@ -27,13 +27,6 @@ CalibrationPage::CalibrationPage(QWidget* parent)
     calibInstruction_->setStyleSheet("color: #ffff00; font-weight: bold;");
     lay->addWidget(calibInstruction_);
 
-    startCalibBtn_ = new QPushButton("Start calibration", this);
-    startCalibBtn_->setFixedWidth(kBtnWide);
-    connect(startCalibBtn_, &QPushButton::clicked,
-            this, &CalibrationPage::startCalibrationClicked);
-    startCalibBtn_->setVisible(false);
-    lay->addWidget(startCalibBtn_);
-
     scrollArea_ = new QScrollArea(this);
     scrollArea_->setWidgetResizable(true);
     scrollContent_ = new QWidget(this);
@@ -70,18 +63,6 @@ void CalibrationPage::onCalibUIUpdated(const CalibUIState& calib) {
     currentGaugeIdx_ = static_cast<int>(calib.currentGauge);
 
     switch (calib.state) {
-    case GaugeState::kCircleManual:
-        if (calib.circleStage == 1)
-            calibInstruction_->setText(
-                "Click on the CENTER of the gauge");
-        else if (calib.circleStage == 2)
-            calibInstruction_->setText(
-                "Now click on the EDGE of the gauge face");
-        else if (calib.circleStage == 3)
-            calibInstruction_->setText(
-                QString("Gauge %1 placed").arg(calib.totalGauges));
-        break;
-
     case GaugeState::kCalibrating:
         if (calib.totalGauges > 1)
             gaugeProgress_->setText(
@@ -98,8 +79,6 @@ void CalibrationPage::onCalibUIUpdated(const CalibUIState& calib) {
     default:
         break;
     }
-
-    startCalibBtn_->setVisible(calib.state == GaugeState::kCircleManual);
 }
 
 void CalibrationPage::onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib) {
@@ -110,8 +89,6 @@ void CalibrationPage::onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib) 
 }
 
 void CalibrationPage::connectToWorker(Worker* worker) {
-    connect(this, &CalibrationPage::startCalibrationClicked,
-            worker, &Worker::startCalibration);
     connect(this, &CalibrationPage::confirmCalibClicked,
             worker, &Worker::confirmCalib);
     connect(this, &CalibrationPage::cancelCalibClicked,

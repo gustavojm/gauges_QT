@@ -24,7 +24,6 @@ public slots:
     void onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib);
 
 signals:
-    void startCalibrationClicked();
     void confirmCalibClicked();
     void cancelCalibClicked();
     void gaugeCalibRangeChanged(int idx, double minVal, double maxVal);
@@ -34,7 +33,6 @@ private:
 
     QLabel* gaugeProgress_ = nullptr;
     QLabel* calibInstruction_ = nullptr;
-    QPushButton* startCalibBtn_ = nullptr;
     QScrollArea* scrollArea_ = nullptr;
     QWidget* scrollContent_ = nullptr;
     QVBoxLayout* sectionsLayout_ = nullptr;

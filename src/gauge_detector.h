@@ -25,7 +25,6 @@ inline constexpr double kRadiusInset = 0.85;
 
 enum class GaugeState {
     kInit,
-    kCircleManual,
     kCalibrating,
     kProcessing
 };
@@ -43,15 +42,10 @@ public:
     // ─── State Machine ──────────────────────────────────────────────
     GaugeState state() const { return state_; }    
 
-    int circle_stage() const { return circle_stage_; }    
-    const cv::Point& circle_center() const { return circle_center_; }    
-    int circle_radius() const { return circle_radius_; }    
-
     const cv::Point& pt_min() const { return pt_min_; }
     const cv::Point& pt_max() const { return pt_max_; }
 
     // ─── Circle ─────────────────────────────────────────────────────
-    void SetCircle(const cv::Point& center, int radius);
     void StartProcessing();
 
     // ─── Needle Detection ───────────────────────────────────────────
@@ -67,15 +61,16 @@ public:
 
     // ─── Overlay Drawing ────────────────────────────────────────────
     void DrawOverlay(cv::Mat& frame, int labelY = 60) const;
+    void DrawCalibrationOverlay(cv::Mat& frame, bool highlight = false) const;
 
     // ─── State Access ───────────────────────────────────────────────
-    const GaugeROI& gauge() const { return gauge_; }
     const ScaleCalibration& scale() const { return scale_; }
 
     // ─── Color ───────────────────────────────────────────────────────
     const cv::Scalar& color() const { return color_; }
-    void set_color(const cv::Scalar& c) { color_ = c; }
     static cv::Scalar NextColor();
+    void DrawGaugeNumber(cv::Mat& img) const;
+    void DrawOutline(cv::Mat& img, bool highlight = false) const;
 
     // ─── Smoothing ──────────────────────────────────────────────────
     double SmoothReadings(double value);
@@ -95,10 +90,10 @@ public:
     int HitTestMarker(cv::Point click, int radius) const;
 
     // Project click onto the circle perimeter and store in pt_min_ / pt_max_.
-    void MoveMarkerToPerimeter(int which, cv::Point click, cv::Point center, int radius);
+    void MoveMarkerToPerimeter(int which, cv::Point click);
 
     // Handle a click coming from the UI while in manual / calibration modes.
-    void HandleClick(int clickX, int clickY);
+    int HandleClick(int clickX, int clickY);
 
 private:
     GaugeROI gauge_{};
@@ -109,9 +104,6 @@ private:
 
     // State machine
     GaugeState state_ = GaugeState::kInit;
-    int circle_stage_ = 0;
-    cv::Point circle_center_;
-    int circle_radius_ = 0;
     cv::Point pt_min_, pt_max_;
 
     cv::Mat CreateMask(const cv::Mat& frame) const;
@@ -123,6 +115,8 @@ private:
     double angle_ = -1;
     double value_ = -1;
     double smoothed_value_ = 0;
+    int number_ = 0;
+    static int next_number_;
 };
 
 // ─── Shared Types ─────────────────────────────────────────────────
@@ -133,7 +127,6 @@ Q_DECLARE_METATYPE(AppMode)
 
 struct CalibUIState {
     GaugeState state = GaugeState::kInit;
-    int circleStage = 0;
     size_t currentGauge = 0;
     size_t totalGauges = 0;
     bool initialized = false;

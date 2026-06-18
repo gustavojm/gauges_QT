@@ -57,6 +57,12 @@ DetectionPage::DetectionPage(QWidget* parent)
     gaugeCountLabel_ = new QLabel("Found 0 gauge(s)", this);
     lay->addWidget(gaugeCountLabel_);
 
+    instructionLabel_ = new QLabel(this);
+    instructionLabel_->setWordWrap(true);
+    instructionLabel_->setStyleSheet("color: #ffff00; font-weight: bold;");
+    instructionLabel_->setVisible(false);
+    lay->addWidget(instructionLabel_);
+
     lay->addSpacing(8);
 
     auto* btnRow = new QWidget(this);
@@ -81,6 +87,15 @@ void DetectionPage::onDetectionUpdated(int numGauges) {
 void DetectionPage::setManualPlacementActive(bool active) {
     cannyRow_->setVisible(!active);
     accRow_->setVisible(!active);
+    instructionLabel_->setVisible(active);
+    if (!active) instructionLabel_->clear();
+}
+
+void DetectionPage::onManualInstructionChanged(bool centerStage) {
+    if (centerStage)
+        instructionLabel_->setText("Click on the CENTER of the gauge");
+    else
+        instructionLabel_->setText("Now click on the EDGE of the gauge face");
 }
 
 void DetectionPage::connectToWorker(Worker* worker) {
@@ -96,4 +111,6 @@ void DetectionPage::connectToWorker(Worker* worker) {
             this, &DetectionPage::onDetectionUpdated);
     connect(worker, &Worker::manualPlacementActive,
             this, &DetectionPage::setManualPlacementActive);
+    connect(worker, &Worker::manualInstructionChanged,
+            this, &DetectionPage::onManualInstructionChanged);
 }

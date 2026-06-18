@@ -39,6 +39,7 @@ signals:
     void calibUIUpdated(const CalibUIState& state);
     void modeChanged(AppMode mode);
     void manualPlacementActive(bool active);
+    void manualInstructionChanged(bool centerStage);
     void finished();
 
 public slots:
