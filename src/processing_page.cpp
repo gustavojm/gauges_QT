@@ -50,20 +50,16 @@ ProcessingPage::ProcessingPage(QWidget* parent)
     lay->addWidget(btnRow);
 }
 
-void ProcessingPage::rebuildSections(const QVector<GaugeCalibData>& calib) {
-    ::rebuildGaugeSections(sections_, sectionsLayout_, scrollContent_, calib, this);
-}
-
 void ProcessingPage::onFrameCountUpdated(int current, int total) {
     frameCountLabel_->setText(
         QString("Frame %1 / %2").arg(current).arg(total));
 }
 
-void ProcessingPage::onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib) {
-    if (sections_.size() != static_cast<size_t>(calib.size())) {
-        rebuildSections(calib);
-        return;
-    }
+void ProcessingPage::createCollapsibleSections(const QVector<GaugeCalibData>& calib) {
+    ::rebuildGaugeSections(sections_, sectionsLayout_, scrollContent_, calib, this);
+}
+
+void ProcessingPage::updateSectionValues(const QVector<GaugeCalibData>& calib) {
     for (size_t i = 0; i < sections_.size() && i < static_cast<size_t>(calib.size()); i++) {
         sections_[i].section->setTitle(
             QString("Gauge %1: %2").arg(i + 1).arg(calib[i].value, 0, 'f', 2));
@@ -78,7 +74,9 @@ void ProcessingPage::connectToWorker(Worker* worker) {
     connect(this, &ProcessingPage::gaugeCalibRangeChanged,
             worker, &Worker::setGaugeCalibRange);
     connect(worker, &Worker::gaugeCalibUpdated,
-            this, &ProcessingPage::onGaugeCalibUpdated);
+            this, &ProcessingPage::createCollapsibleSections);
+    connect(worker, &Worker::gaugeValuesUpdated,
+            this, &ProcessingPage::updateSectionValues);
     connect(worker, &Worker::frameCountUpdated,
             this, &ProcessingPage::onFrameCountUpdated);
 }

@@ -221,6 +221,12 @@ void Worker::refreshCalibData() {
     emit gaugeCalibUpdated(calibData_);
 }
 
+void Worker::updateGaugeValues() {
+    for (int i = 0; i < calibData_.size(); ++i)
+        calibData_[i].value = circularGauges_[i].smoothedValue();
+    emit gaugeValuesUpdated(calibData_);
+}
+
 void Worker::enterCalibration() {
     mode_ = AppMode::kCalibration;
     emit modeChanged(AppMode::kCalibration);
@@ -307,7 +313,7 @@ void Worker::processNextFrame() {
 
         frameCount_++;
 
-        refreshCalibData();
+        updateGaugeValues();
 
         emit frameReady(matToQImage(frame));
         emit frameCountUpdated(frameCount_, totalFrames_);

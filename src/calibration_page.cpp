@@ -59,7 +59,6 @@ void CalibrationPage::rebuildSections(const QVector<GaugeCalibData>& calib) {
 
 void CalibrationPage::onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib) {
     if (calib.isEmpty()) return;
-
     if (sections_.size() != static_cast<size_t>(calib.size()))
         rebuildSections(calib);
 }

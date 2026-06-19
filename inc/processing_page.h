@@ -21,7 +21,8 @@ public:
 
 public slots:
     void onFrameCountUpdated(int current, int total);
-    void onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib);
+    void createCollapsibleSections(const QVector<GaugeCalibData>& calib);
+    void updateSectionValues(const QVector<GaugeCalibData>& calib);
 
 signals:
     void restartClicked();
@@ -29,8 +30,6 @@ signals:
     void gaugeCalibRangeChanged(int idx, double minVal, double maxVal);
 
 private:
-    void rebuildSections(const QVector<GaugeCalibData>& calib);
-
     QLabel* frameCountLabel_ = nullptr;
     QScrollArea* scrollArea_ = nullptr;
     QWidget* scrollContent_ = nullptr;

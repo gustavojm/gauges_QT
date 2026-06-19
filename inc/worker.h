@@ -34,6 +34,7 @@ public:
 signals:
     void frameReady(const QImage& image);
     void gaugeCalibUpdated(const QVector<GaugeCalibData>& calib);
+    void gaugeValuesUpdated(const QVector<GaugeCalibData>& calib);
     void frameCountUpdated(int current, int total);
     void detectionUpdated(int numGauges);
     void modeChanged(AppMode mode);
@@ -68,6 +69,7 @@ private:
     void enterCalibration();
     void enterProcessing();
     void refreshCalibData();
+    void updateGaugeValues();
 
     std::string videoPath_;
     cv::VideoCapture cap_;
