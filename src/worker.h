@@ -36,7 +36,6 @@ signals:
     void gaugeCalibUpdated(const QVector<GaugeCalibData>& calib);
     void frameCountUpdated(int current, int total);
     void detectionUpdated(int numGauges);
-    void calibUIUpdated(const CalibUIState& state);
     void modeChanged(AppMode mode);
     void manualPlacementActive(bool active);
     void manualInstructionChanged(bool centerStage);
@@ -62,7 +61,6 @@ private slots:
 private:
     void timerEvent(QTimerEvent* event) override;
 
-    CalibUIState computeCalibUI() const;
     static QImage matToQImage(const cv::Mat& bgr);
     void displayDetectionOverlay();
     void reRunDetection();

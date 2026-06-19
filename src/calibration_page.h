@@ -20,7 +20,6 @@ public:
     void connectToWorker(class Worker* worker);
 
 public slots:
-    void onCalibUIUpdated(const CalibUIState& state);
     void onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib);
 
 signals:
@@ -31,7 +30,6 @@ signals:
 private:
     void rebuildSections(const QVector<GaugeCalibData>& calib);
 
-    QLabel* gaugeProgress_ = nullptr;
     QLabel* calibInstruction_ = nullptr;
     QScrollArea* scrollArea_ = nullptr;
     QWidget* scrollContent_ = nullptr;

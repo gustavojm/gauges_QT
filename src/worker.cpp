@@ -60,18 +60,6 @@ QImage Worker::matToQImage(const cv::Mat& bgr) {
     return img.copy();
 }
 
-CalibUIState Worker::computeCalibUI() const {
-    CalibUIState calib;
-    if (circularGauges_.empty()) {
-        calib.initialized = false;
-        return calib;
-    }
-    
-    calib.initialized = true;
-    calib.totalGauges = circularGauges_.size();
-    return calib;
-}
-
 // ═══════════════════════════════════════════════════════════════════
 //  Initialization (runs on worker thread after moveToThread)
 // ═══════════════════════════════════════════════════════════════════
@@ -191,7 +179,6 @@ void Worker::handleClick(int x, int y) {
         }
 
         publishCalibrationDisplay();
-        emit calibUIUpdated(computeCalibUI());
     }
 }
 
@@ -241,7 +228,6 @@ void Worker::enterCalibration() {
     refreshCalibData();
 
     publishCalibrationDisplay();
-    emit calibUIUpdated(computeCalibUI());
 }
 
 void Worker::confirmGauges() {

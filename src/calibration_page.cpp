@@ -19,12 +19,12 @@ CalibrationPage::CalibrationPage(QWidget* parent)
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(10);
 
-    gaugeProgress_ = new QLabel(this);
-    lay->addWidget(gaugeProgress_);
-
     calibInstruction_ = new QLabel(this);
     calibInstruction_->setWordWrap(true);
     calibInstruction_->setStyleSheet("color: #ffff00; font-weight: bold;");
+    calibInstruction_->setText(
+        "Drag markers to set min/max positions,\n"
+        "adjust values, then confirm");
     lay->addWidget(calibInstruction_);
 
     scrollArea_ = new QScrollArea(this);
@@ -57,15 +57,6 @@ void CalibrationPage::rebuildSections(const QVector<GaugeCalibData>& calib) {
     ::rebuildGaugeSections(sections_, sectionsLayout_, scrollContent_, calib, this);
 }
 
-void CalibrationPage::onCalibUIUpdated(const CalibUIState& calib) {
-    if (!calib.initialized) return;
-
-    gaugeProgress_->clear();
-    calibInstruction_->setText(
-        "Drag markers to set min/max positions,\n"
-        "adjust values, then confirm");
-}
-
 void CalibrationPage::onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib) {
     if (calib.isEmpty()) return;
 
@@ -80,8 +71,6 @@ void CalibrationPage::connectToWorker(Worker* worker) {
             worker, &Worker::quit);
     connect(this, &CalibrationPage::gaugeCalibRangeChanged,
             worker, &Worker::setGaugeCalibRange);
-    connect(worker, &Worker::calibUIUpdated,
-            this, &CalibrationPage::onCalibUIUpdated);
     connect(worker, &Worker::gaugeCalibUpdated,
             this, &CalibrationPage::onGaugeCalibUpdated);
 }

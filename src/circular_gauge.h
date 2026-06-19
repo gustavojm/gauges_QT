@@ -107,9 +107,4 @@ enum class AppMode { kDetection, kCalibration, kProcessing };
 
 Q_DECLARE_METATYPE(AppMode)
 
-struct CalibUIState {
-    size_t totalGauges = 0;
-    bool initialized = false;
-};
 
-Q_DECLARE_METATYPE(CalibUIState)
