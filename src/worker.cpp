@@ -4,6 +4,7 @@
 #include <QThread>
 
 #include <iostream>
+#include <opencv2/core/types.hpp>
 
 namespace {
 
@@ -80,11 +81,6 @@ CalibUIState Worker::computeCalibUI() const {
     return calib;
 }
 
-static const std::vector<cv::Scalar> kPalette = {
-    {0, 0, 255},   {255, 0, 0},   {0, 255, 255},
-    {255, 0, 255}, {255, 255, 0}, {0, 165, 255},
-};
-
 // ═══════════════════════════════════════════════════════════════════
 //  Initialization (runs on worker thread after moveToThread)
 // ═══════════════════════════════════════════════════════════════════
@@ -120,12 +116,12 @@ void Worker::start() {
 void Worker::displayDetectionOverlay() {
     cv::Mat disp = firstFrame_.clone();
     for (size_t i = 0; i < detectedCircularROIs_.size(); i++) {
-        const auto& col = kPalette[i % kPalette.size()];
+        const cv::Scalar color = {0, 0, 255};
         cv::circle(disp, detectedCircularROIs_[i].center,
-                   detectedCircularROIs_[i].radius, col, 2);
+                   detectedCircularROIs_[i].radius, color, 2);
         cv::putText(disp, std::to_string(detectedCircularROIs_[i].radius),
                     detectedCircularROIs_[i].center + cv::Point(-20, 5),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1);
     }
     emit frameReady(matToQImage(disp));
     emit detectionUpdated(detectedCircularROIs_.size());
@@ -389,9 +385,7 @@ void Worker::handleDragMove(int x, int y) {
     if (currentGaugeIdx_ >= circularGauges_.size()) return;
 
     auto& d = circularGauges_[currentGaugeIdx_];
-    if (d.state() != GaugeState::kCalibrating) return;
-
-    d.MoveMarkerToPerimeter(draggingMarker_, cv::Point(x, y));
+    d.MoveMarker(draggingMarker_, cv::Point(x, y));
     publishCalibrationDisplay();
 }
 

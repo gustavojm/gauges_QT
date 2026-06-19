@@ -85,12 +85,8 @@ public:
     static constexpr int kMarkerMin  = 0;
     static constexpr int kMarkerMax  = 1;
 
-    // Returns kMarkerMin if click is near pt_min_, kMarkerMax if near pt_max_,
-    // or kMarkerNone otherwise.  (threshold = radius/6)
-    int HitTestMarker(cv::Point click, int radius) const;
-
     // Project click onto the circle perimeter and store in pt_min_ / pt_max_.
-    void MoveMarkerToPerimeter(int which, cv::Point click);
+    void MoveMarker(int which, cv::Point click);
 
     // Handle a click coming from the UI while in manual / calibration modes.
     int HandleClick(int clickX, int clickY);
@@ -111,7 +107,7 @@ private:
     double DetectNeedleRadial(const cv::Mat& frame) const;
 
     std::deque<double> value_history_;
-    const int smooth_window_ = 5;
+    const size_t smooth_window_ = 5;
     double angle_ = -1;
     double value_ = -1;
     double smoothed_value_ = 0;

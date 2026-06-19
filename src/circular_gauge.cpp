@@ -378,6 +378,8 @@ cv::Scalar CircularGauge::NextColor() {
 int CircularGauge::HandleClick(int clickX, int clickY) {
     if (state_ != GaugeState::kCalibrating) return kMarkerNone;
 
+    // kMarkerMin if click is near pt_min_, kMarkerMax if near pt_max_,
+    // or kMarkerNone otherwise.  (threshold = radius/6)
     int thresh = std::max(roi_.radius / 6, 12);
     cv::Point center = roi_.center;
     cv::Point vecMin = pt_min_ - center;
@@ -394,7 +396,7 @@ int CircularGauge::HandleClick(int clickX, int clickY) {
     else if (dMax <= thresh)
         hit = kMarkerMax;
     if (hit != kMarkerNone) {
-        MoveMarkerToPerimeter(hit, cv::Point(clickX, clickY));
+        MoveMarker(hit, cv::Point(clickX, clickY));
     }
     return hit;
 }
@@ -413,9 +415,7 @@ void CircularGauge::DrawOutline(cv::Mat& img, bool highlight) const {
     if (roi_.radius <= 0) return;
     cv::Scalar color = highlight ? cv::Scalar(0, 255, 255) : color_;
     cv::circle(img, roi_.center, roi_.radius, color, 2);
-    cv::putText(img, std::to_string(number_),
-                roi_.center - cv::Point(8, 8),
-                cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
+    DrawGaugeNumber(img);
 }
 
 CircularGauge::CircularGauge(const cv::Point& center, int radius,
@@ -433,16 +433,9 @@ CircularGauge::CircularGauge(const cv::Point& center, int radius,
                                  cvRound(radius * std::sin(a)));
 }
 
-int CircularGauge::HitTestMarker(cv::Point click, int radius) const {
-    int threshold = std::max(radius / 6, 12);
-    int dmin = cvRound(cv::norm(click - pt_min_));
-    int dmax = cvRound(cv::norm(click - pt_max_));
-    if (dmin <= threshold && dmin <= dmax) return kMarkerMin;
-    if (dmax <= threshold) return kMarkerMax;
-    return kMarkerNone;
-}
+void CircularGauge::MoveMarker(int which, cv::Point click) {
+    if (state_ != GaugeState::kCalibrating) return;
 
-void CircularGauge::MoveMarkerToPerimeter(int which, cv::Point click) {
     cv::Point vec = click - roi_.center;
     double dist = cv::norm(vec);
     if (dist < 1.0) return;
