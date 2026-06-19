@@ -42,9 +42,6 @@ public:
     // ─── State Machine ──────────────────────────────────────────────
     GaugeState state() const { return state_; }    
 
-    const cv::Point& pt_min() const { return pt_min_; }
-    const cv::Point& pt_max() const { return pt_max_; }
-
     // ─── Circle ─────────────────────────────────────────────────────
     void StartProcessing();
 
@@ -54,7 +51,6 @@ public:
     // ─── Calibration ────────────────────────────────────────────────
     void FinalizeCalibration();
     void SetCalibrationValues(double minVal, double maxVal);
-    void SetCalibrationValid(bool valid);
 
     // ─── Value Mapping ──────────────────────────────────────────────
     double AngleToValue(double needleAngle) const;
@@ -96,11 +92,11 @@ public:
     int HandleClick(int clickX, int clickY);
 
 private:
-    GaugeROI gauge_{};
-    ScaleCalibration scale_{0, 0, 0, 1000, false};
+    GaugeROI gauge_ = {};
+    ScaleCalibration scale_ = {0, 0, 0, 1000, false};
 
     // Color
-    cv::Scalar color_{0, 255, 0};
+    cv::Scalar color_ = {0, 255, 0};
 
     // State machine
     GaugeState state_ = GaugeState::kInit;

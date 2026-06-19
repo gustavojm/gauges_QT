@@ -50,7 +50,6 @@ public slots:
     void setAcc(int value);
     void confirmGauges();
     void confirmCalib();
-    void startCalibration();
     void setGaugeCalibRange(int idx, double minVal, double maxVal);
     void handleDragMove(int x, int y);
     void handleDragRelease();

@@ -262,19 +262,6 @@ void Worker::enterCalibration() {
     emit calibUIUpdated(computeCalibUI());
 }
 
-void Worker::startCalibration() {
-    if (mode_ != AppMode::kCalibration || detectors_.empty()) return;
-    currentGaugeIdx_ = 0;
-    calibFrame_ = firstFrame_.clone();
-
-    refreshCalibData();
-
-    std::cout << "  >> Starting calibration for "
-              << detectors_.size() << " gauge(s)\n";
-    publishCalibrationDisplay();
-    emit calibUIUpdated(computeCalibUI());
-}
-
 void Worker::confirmGauges() {
     if (mode_ != AppMode::kDetection || detectedGauges_.empty())
         return;
@@ -359,7 +346,6 @@ void Worker::processNextFrame() {
         auto& d = detectors_[i];
         d.DetectNeedle(frame);
         d.DrawOverlay(frame, labelY);
-        d.DrawGaugeNumber(frame);
         labelY += 30;
     }
 

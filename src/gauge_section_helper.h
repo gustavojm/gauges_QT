@@ -10,7 +10,7 @@
 
 #include <vector>
 
-#include "Section.h"
+#include "section.h"
 #include "worker.h"
 
 struct GaugeSectionWidgets {

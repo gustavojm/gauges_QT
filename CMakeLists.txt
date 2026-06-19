@@ -34,8 +34,8 @@ add_executable(${PROJECT_NAME}
   src/gauge_detector.h
   src/worker.cpp
   src/worker.h
-  src/Section.cpp
-  src/Section.h
+  src/section.cpp
+  src/section.h
   src/gauge_section_helper.h
 )
 

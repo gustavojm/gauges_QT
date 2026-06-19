@@ -234,8 +234,6 @@ void GaugeDetector::SetCalibrationValues(double minVal, double maxVal) {
     scale_.valid = true;
 }
 
-void GaugeDetector::SetCalibrationValid(bool valid) { scale_.valid = valid; }
-
 // ═══════════════════════════════════════════════════════════════════
 //  Angle-to-Value
 // ═══════════════════════════════════════════════════════════════════
@@ -305,6 +303,9 @@ void GaugeDetector::DrawOverlay(cv::Mat& frame, int labelY) const {
             cv::circle(frame, gauge_.center, 5, color_, -1);
         }
     }
+
+    DrawGaugeNumber(frame);
+
     std::ostringstream oss;
     oss << "Value: " << std::fixed << std::setprecision(2) << value_;
     cv::putText(frame, oss.str(), cv::Point(30, labelY),

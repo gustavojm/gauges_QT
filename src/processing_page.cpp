@@ -1,6 +1,6 @@
 #include "processing_page.h"
 
-#include "Section.h"
+#include "section.h"
 
 #include <QHBoxLayout>
 #include <QLabel>

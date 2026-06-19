@@ -20,7 +20,7 @@
 
 #include <QPropertyAnimation>
 
-#include "Section.h"
+#include "section.h"
 #include <QDebug>
 namespace ui
 {
