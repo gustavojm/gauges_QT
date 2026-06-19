@@ -91,10 +91,13 @@ private:
     int frameCount_ = 0;
 
     AppMode mode_ = AppMode::kDetection;
-    bool quit_ = false;
+   
     int draggingMarker_ = CircularGauge::kMarkerNone;
 
     QBasicTimer chainTimer_;
     QVector<GaugeCalibData> calibData_;
+
+    // Safe: only set via the queued quit() slot from the main thread.
+    bool quit_ = false;
 
 };

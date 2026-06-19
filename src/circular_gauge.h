@@ -96,7 +96,7 @@ public:
     int HandleClick(int clickX, int clickY);
 
 private:
-    ROI gauge_ = {};
+    ROI roi_ = {};
     ScaleCalibration scale_ = {0, 0, 0, 1000, false};
 
     // Color

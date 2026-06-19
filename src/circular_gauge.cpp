@@ -66,7 +66,7 @@ std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
 
 cv::Mat CircularGauge::CreateMask(const cv::Mat& frame) const {
     cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
-    cv::circle(mask, gauge_.center, gauge_.radius, cv::Scalar(255), -1);
+    cv::circle(mask, roi_.center, roi_.radius, cv::Scalar(255), -1);
     return mask;
 }
 
@@ -101,14 +101,14 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
     double bestScore = 0;
     for (size_t i = 0; i < contours.size(); i++) {
         double area = cv::contourArea(contours[i]);
-        if (area < gauge_.radius * 0.5) continue;
+        if (area < roi_.radius * 0.5) continue;
         cv::Moments m = cv::moments(contours[i]);
         if (m.m00 == 0) continue;
         cv::Point centroid(cvRound(m.m10 / m.m00), cvRound(m.m01 / m.m00));
-        if (cv::norm(centroid - gauge_.center) > gauge_.radius * 0.6) continue;
+        if (cv::norm(centroid - roi_.center) > roi_.radius * 0.6) continue;
         double maxDist = 0;
         for (const auto& pt : contours[i])
-            maxDist = std::max(maxDist, cv::norm(pt - gauge_.center));
+            maxDist = std::max(maxDist, cv::norm(pt - roi_.center));
         double score = maxDist * std::log(area + 1);
         if (score > bestScore) {
             bestScore = score;
@@ -121,13 +121,13 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
     double maxDist = 0;
     cv::Point tip;
     for (const auto& pt : contours[bestIdx]) {
-        double d = cv::norm(pt - gauge_.center);
+        double d = cv::norm(pt - roi_.center);
         if (d > maxDist) {
             maxDist = d;
             tip = pt;
         }
     }
-    return std::atan2(tip.y - gauge_.center.y, tip.x - gauge_.center.x);
+    return std::atan2(tip.y - roi_.center.y, tip.x - roi_.center.x);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -150,16 +150,16 @@ double CircularGauge::DetectNeedleRadial(const cv::Mat& frame) const {
     int numAngles = 360;
     double bestScore = 0;
     double bestAngle = -1;
-    int startR = cvRound(gauge_.radius * 0.08);
-    int endR = gauge_.radius;
+    int startR = cvRound(roi_.radius * 0.08);
+    int endR = roi_.radius;
 
     for (int i = 0; i < numAngles; i++) {
         double angle = 2.0 * kPi * i / numAngles;
         int longestRun = 0, darkRun = 0, totalDark = 0, totalScan = 0;
         bool inRun = false;
         for (int r = startR; r < endR; r++) {
-            int x = cvRound(gauge_.center.x + r * std::cos(angle));
-            int y = cvRound(gauge_.center.y + r * std::sin(angle));
+            int x = cvRound(roi_.center.x + r * std::cos(angle));
+            int y = cvRound(roi_.center.y + r * std::sin(angle));
             if (x < 0 || x >= binary.cols || y < 0 || y >= binary.rows) break;
             if (mask.at<uchar>(y, x) == 0) break;
             totalScan++;
@@ -176,7 +176,7 @@ double CircularGauge::DetectNeedleRadial(const cv::Mat& frame) const {
         }
         if (inRun && darkRun > longestRun) longestRun = darkRun;
         double density = totalScan > 0 ? (double)totalDark / totalScan : 0;
-        double reach = totalScan > 0 ? (double)longestRun / gauge_.radius : 0;
+        double reach = totalScan > 0 ? (double)longestRun / roi_.radius : 0;
         double score = density * 0.4 + reach * 0.6;
         if (score > bestScore) {
             bestScore = score;
@@ -221,9 +221,9 @@ double CircularGauge::DetectNeedle(const cv::Mat& frame) {
 
 void CircularGauge::FinalizeCalibration() {
     scale_.start_angle =
-        std::atan2(pt_min_.y - gauge_.center.y, pt_min_.x - gauge_.center.x);
+        std::atan2(pt_min_.y - roi_.center.y, pt_min_.x - roi_.center.x);
     scale_.end_angle =
-        std::atan2(pt_max_.y - gauge_.center.y, pt_max_.x - gauge_.center.x);
+        std::atan2(pt_max_.y - roi_.center.y, pt_max_.x - roi_.center.x);
 
     scale_.valid = true;
 }
@@ -274,33 +274,33 @@ double CircularGauge::AngleToValue(double needleAngle) const {
 // ═══════════════════════════════════════════════════════════════════
 
 void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
-    if (gauge_.radius > 0) {
-        cv::circle(frame, gauge_.center, gauge_.radius, color_,
+    if (roi_.radius > 0) {
+        cv::circle(frame, roi_.center, roi_.radius, color_,
                    kCircleThickness);
         if (scale_.valid) {
-            int arcR = cvRound(gauge_.radius * kRadiusInset);
+            int arcR = cvRound(roi_.radius * kRadiusInset);
             cv::Point startPt(
-                gauge_.center.x + cvRound(arcR * std::cos(scale_.start_angle)),
-                gauge_.center.y + cvRound(arcR * std::sin(scale_.start_angle)));
-            cv::line(frame, gauge_.center, startPt, cv::Scalar(0, 255, 0), 2);
+                roi_.center.x + cvRound(arcR * std::cos(scale_.start_angle)),
+                roi_.center.y + cvRound(arcR * std::sin(scale_.start_angle)));
+            cv::line(frame, roi_.center, startPt, cv::Scalar(0, 255, 0), 2);
             cv::putText(frame, std::to_string((int)scale_.min_value),
                         startPt + cv::Point(10, 0), cv::FONT_HERSHEY_SIMPLEX,
                         0.6, cv::Scalar(0, 255, 0), 2);
             cv::Point endPt(
-                gauge_.center.x + cvRound(arcR * std::cos(scale_.end_angle)),
-                gauge_.center.y + cvRound(arcR * std::sin(scale_.end_angle)));
-            cv::line(frame, gauge_.center, endPt, cv::Scalar(0, 0, 255), 2);
+                roi_.center.x + cvRound(arcR * std::cos(scale_.end_angle)),
+                roi_.center.y + cvRound(arcR * std::sin(scale_.end_angle)));
+            cv::line(frame, roi_.center, endPt, cv::Scalar(0, 0, 255), 2);
             cv::putText(frame, std::to_string((int)scale_.max_value),
                         endPt + cv::Point(10, 0), cv::FONT_HERSHEY_SIMPLEX, 0.6,
                         cv::Scalar(0, 0, 255), 2);
         }
         if (angle_ >= 0) {
-            cv::Point needleTip(gauge_.center.x + cvRound(gauge_.radius * 0.8 *
+            cv::Point needleTip(roi_.center.x + cvRound(roi_.radius * 0.8 *
                                                           std::cos(angle_)),
-                                gauge_.center.y + cvRound(gauge_.radius * 0.8 *
+                                roi_.center.y + cvRound(roi_.radius * 0.8 *
                                                           std::sin(angle_)));
-            cv::line(frame, gauge_.center, needleTip, cv::Scalar(255, 0, 0), 3);
-            cv::circle(frame, gauge_.center, 5, color_, -1);
+            cv::line(frame, roi_.center, needleTip, cv::Scalar(255, 0, 0), 3);
+            cv::circle(frame, roi_.center, 5, color_, -1);
         }
     }
 
@@ -322,15 +322,15 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame,
     if (pt_min_ == cv::Point() && pt_max_ == cv::Point()) return;
 
     int thickness = highlight ? 2 : 1;
-    int arcR = cvRound(gauge_.radius * kRadiusInset);
+    int arcR = cvRound(roi_.radius * kRadiusInset);
 
-    cv::circle(frame, gauge_.center, 4, cv::Scalar(255, 255, 255), -1);
+    cv::circle(frame, roi_.center, 4, cv::Scalar(255, 255, 255), -1);
 
-    cv::Point vecMin = pt_min_ - gauge_.center;
-    cv::Point vecMax = pt_max_ - gauge_.center;
-    cv::Point ptMinIn = gauge_.center + cv::Point(
+    cv::Point vecMin = pt_min_ - roi_.center;
+    cv::Point vecMax = pt_max_ - roi_.center;
+    cv::Point ptMinIn = roi_.center + cv::Point(
         cvRound(vecMin.x * kRadiusInset), cvRound(vecMin.y * kRadiusInset));
-    cv::Point ptMaxIn = gauge_.center + cv::Point(
+    cv::Point ptMaxIn = roi_.center + cv::Point(
         cvRound(vecMax.x * kRadiusInset), cvRound(vecMax.y * kRadiusInset));
 
     double a0 = std::atan2(vecMin.y, vecMin.x) * 180.0 / kPi;
@@ -343,7 +343,7 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame,
         if (!cwTop) std::swap(a0, a1);
     }
     if (a1 <= a0) a1 += 360;
-    cv::ellipse(frame, gauge_.center, cv::Size(arcR, arcR), 0, a0, a1,
+    cv::ellipse(frame, roi_.center, cv::Size(arcR, arcR), 0, a0, a1,
                 cv::Scalar(0, 255, 255), thickness);
 
     cv::circle(frame, ptMinIn, 10, cv::Scalar(0, 255, 0), -1);
@@ -378,8 +378,8 @@ cv::Scalar CircularGauge::NextColor() {
 int CircularGauge::HandleClick(int clickX, int clickY) {
     if (state_ != GaugeState::kCalibrating) return kMarkerNone;
 
-    int thresh = std::max(gauge_.radius / 6, 12);
-    cv::Point center = gauge_.center;
+    int thresh = std::max(roi_.radius / 6, 12);
+    cv::Point center = roi_.center;
     cv::Point vecMin = pt_min_ - center;
     cv::Point vecMax = pt_max_ - center;
     cv::Point ptMinIn = center + cv::Point(
@@ -405,22 +405,22 @@ int CircularGauge::HandleClick(int clickX, int clickY) {
 
 void CircularGauge::DrawGaugeNumber(cv::Mat& img) const {
     cv::putText(img, std::to_string(number_),
-                gauge_.center - cv::Point(8, 8),
+                roi_.center - cv::Point(8, 8),
                 cv::FONT_HERSHEY_SIMPLEX, 0.8, color_, 2);
 }
 
 void CircularGauge::DrawOutline(cv::Mat& img, bool highlight) const {
-    if (gauge_.radius <= 0) return;
+    if (roi_.radius <= 0) return;
     cv::Scalar color = highlight ? cv::Scalar(0, 255, 255) : color_;
-    cv::circle(img, gauge_.center, gauge_.radius, color, 2);
+    cv::circle(img, roi_.center, roi_.radius, color, 2);
     cv::putText(img, std::to_string(number_),
-                gauge_.center - cv::Point(8, 8),
+                roi_.center - cv::Point(8, 8),
                 cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
 }
 
 CircularGauge::CircularGauge(const cv::Point& center, int radius,
                              const cv::Scalar& color) {
-    gauge_ = {center, radius};
+    roi_ = {center, radius};
     color_ = color;
     state_ = GaugeState::kCalibrating;
     number_ = next_number_++;
@@ -443,11 +443,11 @@ int CircularGauge::HitTestMarker(cv::Point click, int radius) const {
 }
 
 void CircularGauge::MoveMarkerToPerimeter(int which, cv::Point click) {
-    cv::Point vec = click - gauge_.center;
+    cv::Point vec = click - roi_.center;
     double dist = cv::norm(vec);
     if (dist < 1.0) return;
-    double scale = static_cast<double>(gauge_.radius) / dist;
-    cv::Point onCircle = gauge_.center + cv::Point(cvRound(vec.x * scale),
+    double scale = static_cast<double>(roi_.radius) / dist;
+    cv::Point onCircle = roi_.center + cv::Point(cvRound(vec.x * scale),
                                              cvRound(vec.y * scale));
     if (which == kMarkerMin)
         pt_min_ = onCircle;
