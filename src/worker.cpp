@@ -211,7 +211,7 @@ void Worker::publishCalibrationDisplay() {
     drawAllGauges(disp, circularGauges_);
 
     // Draw calibration markers for all gauges
-    for (auto& d : circularGauges_) {
+    for (const auto& d : circularGauges_) {
         d.DrawCalibrationOverlay(disp);
     }
 
@@ -226,7 +226,7 @@ void Worker::refreshCalibData() {
     calibData_.resize(static_cast<int>(circularGauges_.size()));
     auto out = calibData_.begin();
     for (const auto& d : circularGauges_) {
-        out->value = d.GetSmoothedValue();
+        out->value = d.smoothedValue();
         out->minValue = d.scale().min_value;
         out->maxValue = d.scale().max_value;
         out->colorRgb = bgrToRgb(d.color());
@@ -298,8 +298,7 @@ void Worker::enterProcessing() {
 
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
         std::cerr << "Warning: Could not reset to frame 0 in enterProcessing()\n";
-    for (auto& d : circularGauges_)
-        d.StartProcessing();
+
     frameCount_ = 0;
 
     mode_ = AppMode::kProcessing;
@@ -321,22 +320,24 @@ void Worker::processNextFrame() {
         return;
     }
 
-    int labelY = 60;
-    for (auto& d : circularGauges_) {
-        d.DetectNeedle(frame);
-        d.DrawOverlay(frame, labelY);
-        labelY += 30;
+    if (!frame.empty()) {
+        int labelY = 60;
+        for (auto& d : circularGauges_) {
+            d.DetectNeedle(frame);
+            d.DrawOverlay(frame, labelY);
+            labelY += 30;
+        }
+
+        if (writer_.isOpened()) writer_.write(frame);
+        frameCount_++;
+
+        refreshCalibData();
+
+        emit frameReady(matToQImage(frame));
+        emit frameCountUpdated(frameCount_, totalFrames_);
+
+        chainTimer_.start(0, this);
     }
-
-    if (writer_.isOpened()) writer_.write(frame);
-    frameCount_++;
-
-    refreshCalibData();
-
-    emit frameReady(matToQImage(frame));
-    emit frameCountUpdated(frameCount_, totalFrames_);
-
-    chainTimer_.start(0, this);
 }
 
 void Worker::restart() {

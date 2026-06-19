@@ -13,10 +13,6 @@ constexpr int kCalibPtRadius = 10;
 
 int CircularGauge::next_number_ = 1;
 
-void CircularGauge::StartProcessing() {
-    state_ = GaugeState::kProcessing;
-}
-
 // ═══════════════════════════════════════════════════════════════════
 //  Static: Find all gauges in frame
 // ═══════════════════════════════════════════════════════════════════
@@ -186,7 +182,7 @@ double CircularGauge::DetectNeedleRadial(const cv::Mat& frame) const {
     return bestAngle;
 }
 
-double CircularGauge::SmoothReadings(double value) {
+void CircularGauge::AddReading(double value) {
     if (value >= 0) {
         value_history_.push_back(value);
         if (value_history_.size() > smooth_window_) value_history_.pop_front();
@@ -197,8 +193,7 @@ double CircularGauge::SmoothReadings(double value) {
         smoothed_value_ =
             std::accumulate(value_history_.begin(), value_history_.end(), 0.0) /
             value_history_.size();
-    }
-    return smoothed_value_;
+    }    
 }
 
 double CircularGauge::DetectNeedle(const cv::Mat& frame) {
@@ -209,7 +204,7 @@ double CircularGauge::DetectNeedle(const cv::Mat& frame) {
 
     if (angle_ >= 0) {
         value_ = AngleToValue(angle_);
-        SmoothReadings(value_);
+        AddReading(value_);
         return value_;
     }
     return -1;
@@ -317,7 +312,6 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
 // ═══════════════════════════════════════════════════════════════════
 
 void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) const {
-    if (state_ != GaugeState::kCalibrating) return;
     if (pt_min_ == cv::Point() && pt_max_ == cv::Point()) return;
 
     int thickness = 1;
@@ -356,7 +350,7 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) const {
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
 }
 
-double CircularGauge::GetSmoothedValue() const { return smoothed_value_; }
+double CircularGauge::smoothedValue() const { return smoothed_value_; }
 
 cv::Scalar CircularGauge::NextColor() {
     static const std::vector<cv::Scalar> palette = {
@@ -375,8 +369,6 @@ cv::Scalar CircularGauge::NextColor() {
 }
 
 int CircularGauge::HandleClick(int clickX, int clickY) {
-    if (state_ != GaugeState::kCalibrating) return kMarkerNone;
-
     // kMarkerMin if click is near pt_min_, kMarkerMax if near pt_max_,
     // or kMarkerNone otherwise.  (threshold = radius/6)
     int thresh = std::max(roi_.radius / 6, 12);
@@ -420,7 +412,6 @@ CircularGauge::CircularGauge(const cv::Point& center, int radius,
                              const cv::Scalar& color) {
     roi_ = {center, radius};
     color_ = color;
-    state_ = GaugeState::kCalibrating;
     number_ = next_number_++;
     // Default markers at 135° (top-right) and 45° (top-left)
     double a = 3.0 * kPi / 4.0;
@@ -432,8 +423,6 @@ CircularGauge::CircularGauge(const cv::Point& center, int radius,
 }
 
 void CircularGauge::MoveMarker(int which, cv::Point click) {
-    if (state_ != GaugeState::kCalibrating) return;
-
     cv::Point vec = click - roi_.center;
     double dist = cv::norm(vec);
     if (dist < 1.0) return;

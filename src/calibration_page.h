@@ -39,5 +39,4 @@ private:
     std::vector<GaugeSectionWidgets> sections_;
     QPushButton* confirmCalibBtn_ = nullptr;
     QPushButton* cancelCalibBtn_ = nullptr;
-    int currentGaugeIdx_ = 0;
 };

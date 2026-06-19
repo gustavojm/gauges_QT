@@ -18,12 +18,6 @@ inline constexpr int kManualCenterRadius = 5;
 inline constexpr int kManualGuideRadius = 30;
 inline constexpr double kRadiusInset = 0.85;
 
-enum class GaugeState {
-    kInit,
-    kCalibrating,
-    kProcessing
-};
-
 class CircularGauge {
 
 public:
@@ -42,12 +36,6 @@ public:
     static std::vector<ROI> FindGauges(const cv::Mat& frame,
                                             int cannyThreshold,
                                             int accumulatorThreshold);
-
-    // ─── State Machine ──────────────────────────────────────────────
-    GaugeState state() const { return state_; }    
-
-    // ─── Circle ─────────────────────────────────────────────────────
-    void StartProcessing();
 
     // ─── Needle Detection ───────────────────────────────────────────
     double DetectNeedle(const cv::Mat& frame);
@@ -73,8 +61,8 @@ public:
     void DrawOutline(cv::Mat& img) const;
 
     // ─── Smoothing ──────────────────────────────────────────────────
-    double SmoothReadings(double value);
-    double GetSmoothedValue() const;
+    void AddReading(double value);
+    double smoothedValue() const;
     void ResetSmoothing() {
         value_history_.clear();
         smoothed_value_ = 0;
@@ -98,8 +86,6 @@ private:
     // Color
     cv::Scalar color_ = {0, 255, 0};
 
-    // State machine
-    GaugeState state_ = GaugeState::kInit;
     cv::Point pt_min_, pt_max_;
 
     cv::Mat CreateMask(const cv::Mat& frame) const;
@@ -122,7 +108,6 @@ enum class AppMode { kDetection, kCalibration, kProcessing };
 Q_DECLARE_METATYPE(AppMode)
 
 struct CalibUIState {
-    GaugeState state = GaugeState::kInit;    
     size_t totalGauges = 0;
     bool initialized = false;
 };

@@ -74,8 +74,6 @@ namespace ui
         toggleAnimation->start();
         
         this->isExpanded = expanded;
-        
-
     }
 
     void QCollapsibleSection::setContentLayout(QLayout* contentLayout)
