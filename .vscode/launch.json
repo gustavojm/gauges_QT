@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/gauges",
-            "args": ["resources/output.mp4"],
+            "args": ["resources/input_1.mp4"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

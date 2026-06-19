@@ -85,7 +85,6 @@ private:
 
     bool manualPending_ = false;
     cv::Point manualCenter_;
-    cv::VideoWriter writer_;
 
     int canny_ = 320;
     int acc_ = 40;

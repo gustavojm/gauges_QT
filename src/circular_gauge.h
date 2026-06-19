@@ -29,7 +29,7 @@ public:
         int radius;
     };
 
-    CircularGauge() = default;
+    CircularGauge() noexcept = default;
     CircularGauge(const cv::Point& center, int radius, const cv::Scalar& color);
 
     // ─── Static: Find all gauges in a frame ─────────────────────────

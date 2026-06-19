@@ -46,7 +46,6 @@ Worker::Worker(const std::string& videoPath, QObject* parent)
 
 Worker::~Worker() {
     cap_.release();
-    if (writer_.isOpened()) writer_.release();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -288,14 +287,6 @@ void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
 // ═══════════════════════════════════════════════════════════════════
 
 void Worker::enterProcessing() {
-    std::string outputPath =
-        videoPath_.substr(0, videoPath_.find_last_of('.')) + "_output.avi";
-    int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-    if (!writer_.open(outputPath, fourcc, fps_, firstFrame_.size()))
-        std::cerr << "Warning: Could not open output video\n";
-    else
-        std::cout << "  >> Output: " << outputPath << "\n";
-
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
         std::cerr << "Warning: Could not reset to frame 0 in enterProcessing()\n";
 
@@ -328,7 +319,6 @@ void Worker::processNextFrame() {
             labelY += 30;
         }
 
-        if (writer_.isOpened()) writer_.write(frame);
         frameCount_++;
 
         refreshCalibData();
@@ -385,10 +375,9 @@ void Worker::handleDragRelease() {
 // ═══════════════════════════════════════════════════════════════════
 
 void Worker::quit() {
-    chainTimer_.stop();
     quit_ = true;
+    chainTimer_.stop();
     cap_.release();
-    if (writer_.isOpened()) writer_.release();
     emit finished();
     QThread::currentThread()->quit();
 }
