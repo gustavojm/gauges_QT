@@ -194,8 +194,6 @@ void Worker::handleClick(int x, int y) {
 
     } else if (mode_ == AppMode::kCalibration && !detectors_.empty() &&
                currentGaugeIdx_ < detectors_.size()) {
-        // Handle state transitions for the current gauge (e.g. circle placement)
-        detectors_[currentGaugeIdx_].HandleClick(x, y);
 
         // Hit-test markers on all gauges and start drag if a marker was hit
         for (size_t i = 0; i < detectors_.size(); i++) {
@@ -238,18 +236,27 @@ void Worker::publishCalibrationDisplay() {
     emit frameReady(matToQImage(disp));
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  Calibration Data
+// ═══════════════════════════════════════════════════════════════════
+
+void Worker::refreshCalibData() {
+    calibData_.resize(static_cast<int>(detectors_.size()));
+    for (size_t i = 0; i < detectors_.size(); i++) {
+        const auto& d = detectors_[i];
+        calibData_[i].value = d.GetSmoothedValue();
+        calibData_[i].minValue = d.scale().min_value;
+        calibData_[i].maxValue = d.scale().max_value;
+        calibData_[i].colorRgb = bgrToRgb(d.color());
+    }
+    emit gaugeCalibUpdated(calibData_);
+}
+
 void Worker::enterCalibration() {
     mode_ = AppMode::kCalibration;
     emit modeChanged(AppMode::kCalibration);
 
-    calibData_.resize(static_cast<int>(detectors_.size()));
-    for (size_t i = 0; i < detectors_.size(); i++) {
-        calibData_[i].value = 0;
-        calibData_[i].minValue = detectors_[i].scale().min_value;
-        calibData_[i].maxValue = detectors_[i].scale().max_value;
-        calibData_[i].colorRgb = bgrToRgb(detectors_[i].color());
-    }
-    emit gaugeCalibUpdated(calibData_);
+    refreshCalibData();
 
     publishCalibrationDisplay();
     emit calibUIUpdated(computeCalibUI());
@@ -259,14 +266,8 @@ void Worker::startCalibration() {
     if (mode_ != AppMode::kCalibration || detectors_.empty()) return;
     currentGaugeIdx_ = 0;
     calibFrame_ = firstFrame_.clone();
-    calibData_.resize(static_cast<int>(detectors_.size()));
-    for (size_t i = 0; i < detectors_.size(); i++) {
-        calibData_[i].value = 0;
-        calibData_[i].minValue = detectors_[i].scale().min_value;
-        calibData_[i].maxValue = detectors_[i].scale().max_value;
-        calibData_[i].colorRgb = bgrToRgb(detectors_[i].color());
-    }
-    emit gaugeCalibUpdated(calibData_);
+
+    refreshCalibData();
 
     std::cout << "  >> Starting calibration for "
               << detectors_.size() << " gauge(s)\n";
@@ -296,8 +297,7 @@ void Worker::confirmCalib() {
 
     for (size_t i = 0; i < detectors_.size(); i++) {
         auto& d = detectors_[i];
-        d.CalibrateFromPoints(d.pt_min(), d.pt_max());
-        d.SetCalibrationValid(true);
+        d.FinalizeCalibration();
         const auto& s = d.scale();
         std::cout << "  >> Gauge " << i
                   << " scale: " << s.min_value << " at "
@@ -312,7 +312,6 @@ void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
     if (idx < 0 || idx >= static_cast<int>(detectors_.size())) return;
     auto& d = detectors_[idx];
     d.SetCalibrationValues(minVal, maxVal);
-    d.SetCalibrationValid(true);
     if (mode_ == AppMode::kCalibration)
         publishCalibrationDisplay();
 }
@@ -339,16 +338,8 @@ void Worker::enterProcessing() {
     mode_ = AppMode::kProcessing;
     emit modeChanged(AppMode::kProcessing);
 
-    calibData_.resize(static_cast<int>(detectors_.size()));
-    for (size_t i = 0; i < detectors_.size(); i++) {
-        auto& d = detectors_[i];
-        calibData_[i].value = d.GetSmoothedValue();
-        calibData_[i].minValue = d.scale().min_value;
-        calibData_[i].maxValue = d.scale().max_value;
-        calibData_[i].colorRgb = bgrToRgb(d.color());
-    }
-    emit gaugeCalibUpdated(calibData_);
-   
+    refreshCalibData();
+
     chainTimer_.start(0, this);
 }
 
@@ -375,16 +366,9 @@ void Worker::processNextFrame() {
     if (writer_.isOpened()) writer_.write(frame);
     frameCount_++;
 
-    calibData_.resize(static_cast<int>(detectors_.size()));
-    for (size_t i = 0; i < detectors_.size(); i++) {
-        calibData_[i].value = detectors_[i].GetSmoothedValue();
-        calibData_[i].minValue = detectors_[i].scale().min_value;
-        calibData_[i].maxValue = detectors_[i].scale().max_value;
-        calibData_[i].colorRgb = bgrToRgb(detectors_[i].color());
-    }
+    refreshCalibData();
 
     emit frameReady(matToQImage(frame));
-    emit gaugeCalibUpdated(calibData_);
     emit frameCountUpdated(frameCount_, totalFrames_);
 
     chainTimer_.start(0, this);

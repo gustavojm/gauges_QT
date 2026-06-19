@@ -52,7 +52,7 @@ public:
     double DetectNeedle(const cv::Mat& frame);
 
     // ─── Calibration ────────────────────────────────────────────────
-    void CalibrateFromPoints(const cv::Point& pt_min, const cv::Point& pt_max);
+    void FinalizeCalibration();
     void SetCalibrationValues(double minVal, double maxVal);
     void SetCalibrationValid(bool valid);
 

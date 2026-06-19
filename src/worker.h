@@ -70,6 +70,7 @@ private:
     void publishCalibrationDisplay();
     void enterCalibration();
     void enterProcessing();
+    void refreshCalibData();
 
     std::string videoPath_;
     cv::VideoCapture cap_;

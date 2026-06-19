@@ -219,17 +219,19 @@ double GaugeDetector::DetectNeedle(const cv::Mat& frame) {
 //  Calibration
 // ═══════════════════════════════════════════════════════════════════
 
-void GaugeDetector::CalibrateFromPoints(const cv::Point& pt_min,
-                                        const cv::Point& pt_max) {
+void GaugeDetector::FinalizeCalibration() {
     scale_.start_angle =
-        std::atan2(pt_min.y - gauge_.center.y, pt_min.x - gauge_.center.x);
+        std::atan2(pt_min_.y - gauge_.center.y, pt_min_.x - gauge_.center.x);
     scale_.end_angle =
-        std::atan2(pt_max.y - gauge_.center.y, pt_max.x - gauge_.center.x);
+        std::atan2(pt_max_.y - gauge_.center.y, pt_max_.x - gauge_.center.x);
+
+    scale_.valid = true;
 }
 
 void GaugeDetector::SetCalibrationValues(double minVal, double maxVal) {
     scale_.min_value = minVal;
     scale_.max_value = maxVal;
+    scale_.valid = true;
 }
 
 void GaugeDetector::SetCalibrationValid(bool valid) { scale_.valid = valid; }
