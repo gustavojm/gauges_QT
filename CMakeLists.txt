@@ -34,8 +34,8 @@ add_executable(${PROJECT_NAME}
   src/circular_gauge.h
   src/worker.cpp
   src/worker.h
-  src/section.cpp
-  src/section.h
+  src/q_collapsible_section.cpp
+  src/q_collapsible_section.h
   src/gauge_section_helper.h
 )
 

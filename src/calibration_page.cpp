@@ -60,25 +60,10 @@ void CalibrationPage::rebuildSections(const QVector<GaugeCalibData>& calib) {
 void CalibrationPage::onCalibUIUpdated(const CalibUIState& calib) {
     if (!calib.initialized) return;
 
-    currentGaugeIdx_ = static_cast<int>(calib.currentGauge);
-
-    switch (calib.state) {
-    case GaugeState::kCalibrating:
-        if (calib.totalGauges > 1)
-            gaugeProgress_->setText(
-                QString("Gauge %1 / %2")
-                    .arg(calib.currentGauge + 1)
-                    .arg(calib.totalGauges));
-        else
-            gaugeProgress_->clear();
-        calibInstruction_->setText(
-            "Drag markers to set min/max positions,\n"
-            "adjust values, then confirm");
-        break;
-
-    default:
-        break;
-    }
+    gaugeProgress_->clear();
+    calibInstruction_->setText(
+        "Drag markers to set min/max positions,\n"
+        "adjust values, then confirm");
 }
 
 void CalibrationPage::onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib) {

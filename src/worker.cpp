@@ -27,11 +27,9 @@ void drawDashedCircle(cv::Mat& img, cv::Point center, int radius,
     }
 }
 
-void drawAllGauges(cv::Mat& img,
-                   const std::vector<CircularGauge>& detectors,
-                   int highlightIdx = -1) {
-    for (size_t i = 0; i < detectors.size(); i++)
-        detectors[i].DrawOutline(img, static_cast<int>(i) == highlightIdx);
+void drawAllGauges(cv::Mat& img, const std::vector<CircularGauge>& detectors) {
+    for (const auto& g : detectors)
+        g.DrawOutline(img);
 }
 
 } // namespace
@@ -69,14 +67,8 @@ CalibUIState Worker::computeCalibUI() const {
         calib.initialized = false;
         return calib;
     }
-    if (currentGaugeIdx_ >= circularGauges_.size()) {
-        calib.initialized = false;
-        return calib;
-    }
-    const auto& d = circularGauges_[currentGaugeIdx_];
+    
     calib.initialized = true;
-    calib.state = d.state();
-    calib.currentGauge = currentGaugeIdx_;
     calib.totalGauges = circularGauges_.size();
     return calib;
 }
@@ -115,12 +107,11 @@ void Worker::start() {
 
 void Worker::displayDetectionOverlay() {
     cv::Mat disp = firstFrame_.clone();
-    for (size_t i = 0; i < detectedCircularROIs_.size(); i++) {
-        const cv::Scalar color = {0, 0, 255};
-        cv::circle(disp, detectedCircularROIs_[i].center,
-                   detectedCircularROIs_[i].radius, color, 2);
-        cv::putText(disp, std::to_string(detectedCircularROIs_[i].radius),
-                    detectedCircularROIs_[i].center + cv::Point(-20, 5),
+    const cv::Scalar color = {0, 0, 255};
+    for (const auto& roi : detectedCircularROIs_) {
+        cv::circle(disp, roi.center, roi.radius, color, 2);
+        cv::putText(disp, std::to_string(roi.radius),
+                    roi.center + cv::Point(-20, 5),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1);
     }
     emit frameReady(matToQImage(disp));
@@ -173,10 +164,10 @@ void Worker::handleClick(int x, int y) {
         }
 
         cv::Mat disp = firstFrame_.clone();
-        for (size_t i = 0; i < detectedCircularROIs_.size(); i++) {
-            const auto& g = detectedCircularROIs_[i];
+        int label = 1;
+        for (const auto& g : detectedCircularROIs_) {
             cv::circle(disp, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
-            cv::putText(disp, std::to_string(i + 1),
+            cv::putText(disp, std::to_string(label++),
                         g.center - cv::Point(8, 8),
                         cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
         }
@@ -188,15 +179,15 @@ void Worker::handleClick(int x, int y) {
         emit frameReady(matToQImage(disp));
         emit detectionUpdated(detectedCircularROIs_.size());
 
-    } else if (mode_ == AppMode::kCalibration && !circularGauges_.empty() &&
-               currentGaugeIdx_ < circularGauges_.size()) {
+    } else if (mode_ == AppMode::kCalibration && !circularGauges_.empty()) {
 
         // Hit-test markers on all gauges and start drag if a marker was hit
         for (size_t i = 0; i < circularGauges_.size(); i++) {
             int hit = circularGauges_[i].HandleClick(x, y);
             if (hit != CircularGauge::kMarkerNone) {
-                currentGaugeIdx_ = i;
+                draggingGaugeIdx_ = static_cast<int>(i);
                 draggingMarker_ = hit;
+                break;
             }
         }
 
@@ -217,16 +208,11 @@ void Worker::publishCalibrationDisplay() {
         disp = firstFrame_.clone();
     }
 
-    if (circularGauges_.empty() || currentGaugeIdx_ >= circularGauges_.size()) {
-        emit frameReady(matToQImage(disp));
-        return;
-    }
-
-    drawAllGauges(disp, circularGauges_, static_cast<int>(currentGaugeIdx_));
+    drawAllGauges(disp, circularGauges_);
 
     // Draw calibration markers for all gauges
-    for (size_t i = 0; i < circularGauges_.size(); i++) {
-        circularGauges_[i].DrawCalibrationOverlay(disp, i == currentGaugeIdx_);
+    for (auto& d : circularGauges_) {
+        d.DrawCalibrationOverlay(disp);
     }
 
     emit frameReady(matToQImage(disp));
@@ -238,12 +224,13 @@ void Worker::publishCalibrationDisplay() {
 
 void Worker::refreshCalibData() {
     calibData_.resize(static_cast<int>(circularGauges_.size()));
-    for (size_t i = 0; i < circularGauges_.size(); i++) {
-        const auto& d = circularGauges_[i];
-        calibData_[i].value = d.GetSmoothedValue();
-        calibData_[i].minValue = d.scale().min_value;
-        calibData_[i].maxValue = d.scale().max_value;
-        calibData_[i].colorRgb = bgrToRgb(d.color());
+    auto out = calibData_.begin();
+    for (const auto& d : circularGauges_) {
+        out->value = d.GetSmoothedValue();
+        out->minValue = d.scale().min_value;
+        out->maxValue = d.scale().max_value;
+        out->colorRgb = bgrToRgb(d.color());
+        ++out;
     }
     emit gaugeCalibUpdated(calibData_);
 }
@@ -270,20 +257,17 @@ void Worker::confirmGauges() {
                   << "), radius=" << g.radius << "\n";
     }
     detectedCircularROIs_.clear();
-    calibFrame_ = firstFrame_.clone();
-    currentGaugeIdx_ = 0;
+    calibFrame_ = firstFrame_.clone();    
     enterCalibration();
 }
 
 void Worker::confirmCalib() {
     if (mode_ != AppMode::kCalibration || circularGauges_.empty()) return;
 
-    for (size_t i = 0; i < circularGauges_.size(); i++) {
-        auto& d = circularGauges_[i];
+    for (auto& d : circularGauges_) {
         d.FinalizeCalibration();
         const auto& s = d.scale();
-        std::cout << "  >> Gauge " << i
-                  << " scale: " << s.min_value << " at "
+        std::cout << "  >> Gauge scale: " << s.min_value << " at "
                   << (s.start_angle * 180.0 / kPi) << " deg, "
                   << s.max_value << " at "
                   << (s.end_angle * 180.0 / kPi) << " deg\n";
@@ -338,8 +322,7 @@ void Worker::processNextFrame() {
     }
 
     int labelY = 60;
-    for (size_t i = 0; i < circularGauges_.size(); i++) {
-        auto& d = circularGauges_[i];
+    for (auto& d : circularGauges_) {
         d.DetectNeedle(frame);
         d.DrawOverlay(frame, labelY);
         labelY += 30;
@@ -381,16 +364,19 @@ void Worker::timerEvent(QTimerEvent* event) {
 
 void Worker::handleDragMove(int x, int y) {
     if (draggingMarker_ == CircularGauge::kMarkerNone) return;
-    if (mode_ != AppMode::kCalibration || circularGauges_.empty()) return;
-    if (currentGaugeIdx_ >= circularGauges_.size()) return;
+    if (mode_ != AppMode::kCalibration) return;
+    if (draggingGaugeIdx_ < 0 ||
+        static_cast<size_t>(draggingGaugeIdx_) >= circularGauges_.size())
+        return;
 
-    auto& d = circularGauges_[currentGaugeIdx_];
+    auto& d = circularGauges_[static_cast<size_t>(draggingGaugeIdx_)];
     d.MoveMarker(draggingMarker_, cv::Point(x, y));
     publishCalibrationDisplay();
 }
 
 void Worker::handleDragRelease() {
     draggingMarker_ = CircularGauge::kMarkerNone;
+    draggingGaugeIdx_ = -1;
 }
 
 // ═══════════════════════════════════════════════════════════════════

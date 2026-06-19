@@ -80,7 +80,9 @@ private:
     cv::Mat calibFrame_;
     std::vector<CircularGauge::ROI> detectedCircularROIs_;
     std::vector<CircularGauge> circularGauges_;
-    size_t currentGaugeIdx_ = 0;
+    
+    int draggingGaugeIdx_ = -1;
+
     bool manualPending_ = false;
     cv::Point manualCenter_;
     cv::VideoWriter writer_;

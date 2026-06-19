@@ -61,7 +61,7 @@ public:
 
     // ─── Overlay Drawing ────────────────────────────────────────────
     void DrawOverlay(cv::Mat& frame, int labelY = 60) const;
-    void DrawCalibrationOverlay(cv::Mat& frame, bool highlight = false) const;
+    void DrawCalibrationOverlay(cv::Mat& frame) const;
 
     // ─── State Access ───────────────────────────────────────────────
     const ScaleCalibration& scale() const { return scale_; }
@@ -70,7 +70,7 @@ public:
     const cv::Scalar& color() const { return color_; }
     static cv::Scalar NextColor();
     void DrawGaugeNumber(cv::Mat& img) const;
-    void DrawOutline(cv::Mat& img, bool highlight = false) const;
+    void DrawOutline(cv::Mat& img) const;
 
     // ─── Smoothing ──────────────────────────────────────────────────
     double SmoothReadings(double value);
@@ -122,8 +122,7 @@ enum class AppMode { kDetection, kCalibration, kProcessing };
 Q_DECLARE_METATYPE(AppMode)
 
 struct CalibUIState {
-    GaugeState state = GaugeState::kInit;
-    size_t currentGauge = 0;
+    GaugeState state = GaugeState::kInit;    
     size_t totalGauges = 0;
     bool initialized = false;
 };

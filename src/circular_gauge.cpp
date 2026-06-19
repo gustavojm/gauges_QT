@@ -67,7 +67,7 @@ std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
 cv::Mat CircularGauge::CreateMask(const cv::Mat& frame) const {
     cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
     cv::circle(mask, roi_.center, roi_.radius, cv::Scalar(255), -1);
-    return mask;
+    return mask;   
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -316,12 +316,11 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
 //  Calibration Overlay Drawing
 // ═══════════════════════════════════════════════════════════════════
 
-void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame,
-                                           bool highlight) const {
+void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) const {
     if (state_ != GaugeState::kCalibrating) return;
     if (pt_min_ == cv::Point() && pt_max_ == cv::Point()) return;
 
-    int thickness = highlight ? 2 : 1;
+    int thickness = 1;
     int arcR = cvRound(roi_.radius * kRadiusInset);
 
     cv::circle(frame, roi_.center, 4, cv::Scalar(255, 255, 255), -1);
@@ -411,10 +410,9 @@ void CircularGauge::DrawGaugeNumber(cv::Mat& img) const {
                 cv::FONT_HERSHEY_SIMPLEX, 0.8, color_, 2);
 }
 
-void CircularGauge::DrawOutline(cv::Mat& img, bool highlight) const {
+void CircularGauge::DrawOutline(cv::Mat& img) const {
     if (roi_.radius <= 0) return;
-    cv::Scalar color = highlight ? cv::Scalar(0, 255, 255) : color_;
-    cv::circle(img, roi_.center, roi_.radius, color, 2);
+    cv::circle(img, roi_.center, roi_.radius, color_, 2);
     DrawGaugeNumber(img);
 }
 

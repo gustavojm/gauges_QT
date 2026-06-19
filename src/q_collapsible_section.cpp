@@ -20,7 +20,7 @@
 
 #include <QPropertyAnimation>
 
-#include "section.h"
+#include "q_collapsible_section.h"
 #include <QDebug>
 namespace ui
 {

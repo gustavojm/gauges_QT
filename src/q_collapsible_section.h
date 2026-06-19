@@ -18,8 +18,7 @@
     along with Elypson/qt-collapsible-section. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef SECTION_H
-#define SECTION_H
+#pragma once
 
 #include <QFrame>
 #include <QGridLayout>
@@ -65,4 +64,3 @@ namespace ui
     };
 }
 
-#endif // SECTION_H

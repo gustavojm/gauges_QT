@@ -10,7 +10,7 @@
 
 #include <vector>
 
-#include "section.h"
+#include "q_collapsible_section.h"
 #include "worker.h"
 
 struct GaugeSectionWidgets {
