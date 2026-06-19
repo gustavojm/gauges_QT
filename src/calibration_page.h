@@ -3,7 +3,7 @@
 #include <QWidget>
 
 #include "gauge_section_helper.h"
-#include "gauge_detector.h"
+#include "circular_gauge.h"
 #include "worker.h"
 
 class QLabel;

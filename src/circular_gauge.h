@@ -5,11 +5,6 @@
 #include <deque>
 #include <opencv2/opencv.hpp>
 
-struct GaugeROI {
-    cv::Point center;
-    int radius;
-};
-
 struct ScaleCalibration {
     double start_angle;
     double end_angle;
@@ -29,13 +24,22 @@ enum class GaugeState {
     kProcessing
 };
 
-class GaugeDetector {
+class CircularGauge {
+
 public:
-    GaugeDetector() = default;
-    GaugeDetector(const cv::Point& center, int radius, const cv::Scalar& color);
+    /* Region of Interest (the sub-area of an image that an 
+    algorithm should focus on, as opposed to processing 
+    the entire frame). */
+    struct ROI {
+        cv::Point center;
+        int radius;
+    };
+
+    CircularGauge() = default;
+    CircularGauge(const cv::Point& center, int radius, const cv::Scalar& color);
 
     // ─── Static: Find all gauges in a frame ─────────────────────────
-    static std::vector<GaugeROI> FindGauges(const cv::Mat& frame,
+    static std::vector<ROI> FindGauges(const cv::Mat& frame,
                                             int cannyThreshold,
                                             int accumulatorThreshold);
 
@@ -92,7 +96,7 @@ public:
     int HandleClick(int clickX, int clickY);
 
 private:
-    GaugeROI gauge_ = {};
+    ROI gauge_ = {};
     ScaleCalibration scale_ = {0, 0, 0, 1000, false};
 
     // Color

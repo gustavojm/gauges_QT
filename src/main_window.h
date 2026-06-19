@@ -12,7 +12,7 @@
 
 #include <string>
 
-#include "gauge_detector.h"
+#include "circular_gauge.h"
 #include "worker.h"
 #include "detection_page.h"
 #include "calibration_page.h"

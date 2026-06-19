@@ -140,6 +140,6 @@ Run: `./build/gauges <video_path>`
 - `src/main_window.h` — MainWindow + VideoWidget declarations
 - `src/worker.h` — Worker QObject class declaration
 - `src/worker.cpp` — Worker implementation (all processing logic)
-- `src/gauge_detector.h` — GaugeDetector class + shared types (AppMode, CalibUIState, GaugeROI, etc.)
-- `src/gauge_detector.cpp` — Detection/calibration/needle/overlay implementation
+- `src/circular_gauge.h` — GaugeDetector class + shared types (AppMode, CalibUIState, GaugeROI, etc.)
+- `src/circular_gauge.cpp` — Detection/calibration/needle/overlay implementation
 - `CMakeLists.txt` — Build config (OpenCV + Qt6::Widgets)

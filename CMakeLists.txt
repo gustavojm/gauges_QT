@@ -30,8 +30,8 @@ add_executable(${PROJECT_NAME}
   src/calibration_page.h
   src/processing_page.cpp
   src/processing_page.h
-  src/gauge_detector.cpp
-  src/gauge_detector.h
+  src/circular_gauge.cpp
+  src/circular_gauge.h
   src/worker.cpp
   src/worker.h
   src/section.cpp

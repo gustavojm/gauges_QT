@@ -1,4 +1,4 @@
-#include "gauge_detector.h"
+#include "circular_gauge.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,9 +11,9 @@ constexpr int kCircleThickness = 2;
 constexpr int kNeedleThickness = 3;
 constexpr int kCalibPtRadius = 10;
 
-int GaugeDetector::next_number_ = 1;
+int CircularGauge::next_number_ = 1;
 
-void GaugeDetector::StartProcessing() {
+void CircularGauge::StartProcessing() {
     state_ = GaugeState::kProcessing;
 }
 
@@ -21,7 +21,7 @@ void GaugeDetector::StartProcessing() {
 //  Static: Find all gauges in frame
 // ═══════════════════════════════════════════════════════════════════
 
-std::vector<GaugeROI> GaugeDetector::FindGauges(const cv::Mat& frame,
+std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
                                                 int cannyThreshold,
                                                 int accumulatorThreshold) {
     cv::Mat gray;
@@ -42,7 +42,7 @@ std::vector<GaugeROI> GaugeDetector::FindGauges(const cv::Mat& frame,
     if (allCircles.size() > maxCirclesToKeep)
         allCircles.resize(maxCirclesToKeep);
 
-    std::vector<GaugeROI> result;
+    std::vector<CircularGauge::ROI> result;
     for (const auto& c : allCircles) {
         cv::Point center(cvRound(c[0]), cvRound(c[1]));
         int radius = cvRound(c[2]);
@@ -64,7 +64,7 @@ std::vector<GaugeROI> GaugeDetector::FindGauges(const cv::Mat& frame,
 //  Mask
 // ═══════════════════════════════════════════════════════════════════
 
-cv::Mat GaugeDetector::CreateMask(const cv::Mat& frame) const {
+cv::Mat CircularGauge::CreateMask(const cv::Mat& frame) const {
     cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
     cv::circle(mask, gauge_.center, gauge_.radius, cv::Scalar(255), -1);
     return mask;
@@ -74,7 +74,7 @@ cv::Mat GaugeDetector::CreateMask(const cv::Mat& frame) const {
 //  Coloured Needle Detection
 // ═══════════════════════════════════════════════════════════════════
 
-double GaugeDetector::DetectColoredNeedle(const cv::Mat& frame) const {
+double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
     cv::Mat mask = CreateMask(frame);
     cv::Mat masked;
     frame.copyTo(masked, mask);
@@ -134,7 +134,7 @@ double GaugeDetector::DetectColoredNeedle(const cv::Mat& frame) const {
 //  Radial Needle Detection
 // ═══════════════════════════════════════════════════════════════════
 
-double GaugeDetector::DetectNeedleRadial(const cv::Mat& frame) const {
+double CircularGauge::DetectNeedleRadial(const cv::Mat& frame) const {
     cv::Mat gray;
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
     cv::Mat mask = CreateMask(frame);
@@ -186,7 +186,7 @@ double GaugeDetector::DetectNeedleRadial(const cv::Mat& frame) const {
     return bestAngle;
 }
 
-double GaugeDetector::SmoothReadings(double value) {
+double CircularGauge::SmoothReadings(double value) {
     if (value >= 0) {
         value_history_.push_back(value);
         if (value_history_.size() > smooth_window_) value_history_.pop_front();
@@ -201,7 +201,7 @@ double GaugeDetector::SmoothReadings(double value) {
     return smoothed_value_;
 }
 
-double GaugeDetector::DetectNeedle(const cv::Mat& frame) {
+double CircularGauge::DetectNeedle(const cv::Mat& frame) {
     angle_ = DetectColoredNeedle(frame);
     if (angle_ < 0) {
         angle_ = DetectNeedleRadial(frame);
@@ -219,7 +219,7 @@ double GaugeDetector::DetectNeedle(const cv::Mat& frame) {
 //  Calibration
 // ═══════════════════════════════════════════════════════════════════
 
-void GaugeDetector::FinalizeCalibration() {
+void CircularGauge::FinalizeCalibration() {
     scale_.start_angle =
         std::atan2(pt_min_.y - gauge_.center.y, pt_min_.x - gauge_.center.x);
     scale_.end_angle =
@@ -228,7 +228,7 @@ void GaugeDetector::FinalizeCalibration() {
     scale_.valid = true;
 }
 
-void GaugeDetector::SetCalibrationValues(double minVal, double maxVal) {
+void CircularGauge::SetCalibrationValues(double minVal, double maxVal) {
     scale_.min_value = minVal;
     scale_.max_value = maxVal;
     scale_.valid = true;
@@ -238,7 +238,7 @@ void GaugeDetector::SetCalibrationValues(double minVal, double maxVal) {
 //  Angle-to-Value
 // ═══════════════════════════════════════════════════════════════════
 
-double GaugeDetector::AngleToValue(double needleAngle) const {
+double CircularGauge::AngleToValue(double needleAngle) const {
     if (!scale_.valid || needleAngle < 0) return -1;
     auto normalize = [](double a) {
         a = std::fmod(a, 2.0 * kPi);
@@ -273,7 +273,7 @@ double GaugeDetector::AngleToValue(double needleAngle) const {
 //  Overlay Drawing
 // ═══════════════════════════════════════════════════════════════════
 
-void GaugeDetector::DrawOverlay(cv::Mat& frame, int labelY) const {
+void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
     if (gauge_.radius > 0) {
         cv::circle(frame, gauge_.center, gauge_.radius, color_,
                    kCircleThickness);
@@ -316,7 +316,7 @@ void GaugeDetector::DrawOverlay(cv::Mat& frame, int labelY) const {
 //  Calibration Overlay Drawing
 // ═══════════════════════════════════════════════════════════════════
 
-void GaugeDetector::DrawCalibrationOverlay(cv::Mat& frame,
+void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame,
                                            bool highlight) const {
     if (state_ != GaugeState::kCalibrating) return;
     if (pt_min_ == cv::Point() && pt_max_ == cv::Point()) return;
@@ -357,9 +357,9 @@ void GaugeDetector::DrawCalibrationOverlay(cv::Mat& frame,
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
 }
 
-double GaugeDetector::GetSmoothedValue() const { return smoothed_value_; }
+double CircularGauge::GetSmoothedValue() const { return smoothed_value_; }
 
-cv::Scalar GaugeDetector::NextColor() {
+cv::Scalar CircularGauge::NextColor() {
     static const std::vector<cv::Scalar> palette = {
         {0, 0, 255},      // red
         {255, 0, 0},      // blue
@@ -375,7 +375,7 @@ cv::Scalar GaugeDetector::NextColor() {
     return palette[idx++ % palette.size()];
 }
 
-int GaugeDetector::HandleClick(int clickX, int clickY) {
+int CircularGauge::HandleClick(int clickX, int clickY) {
     if (state_ != GaugeState::kCalibrating) return kMarkerNone;
 
     int thresh = std::max(gauge_.radius / 6, 12);
@@ -403,13 +403,13 @@ int GaugeDetector::HandleClick(int clickX, int clickY) {
 //  Static helpers
 // ═══════════════════════════════════════════════════════════════════
 
-void GaugeDetector::DrawGaugeNumber(cv::Mat& img) const {
+void CircularGauge::DrawGaugeNumber(cv::Mat& img) const {
     cv::putText(img, std::to_string(number_),
                 gauge_.center - cv::Point(8, 8),
                 cv::FONT_HERSHEY_SIMPLEX, 0.8, color_, 2);
 }
 
-void GaugeDetector::DrawOutline(cv::Mat& img, bool highlight) const {
+void CircularGauge::DrawOutline(cv::Mat& img, bool highlight) const {
     if (gauge_.radius <= 0) return;
     cv::Scalar color = highlight ? cv::Scalar(0, 255, 255) : color_;
     cv::circle(img, gauge_.center, gauge_.radius, color, 2);
@@ -418,7 +418,7 @@ void GaugeDetector::DrawOutline(cv::Mat& img, bool highlight) const {
                 cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
 }
 
-GaugeDetector::GaugeDetector(const cv::Point& center, int radius,
+CircularGauge::CircularGauge(const cv::Point& center, int radius,
                              const cv::Scalar& color) {
     gauge_ = {center, radius};
     color_ = color;
@@ -433,7 +433,7 @@ GaugeDetector::GaugeDetector(const cv::Point& center, int radius,
                                  cvRound(radius * std::sin(a)));
 }
 
-int GaugeDetector::HitTestMarker(cv::Point click, int radius) const {
+int CircularGauge::HitTestMarker(cv::Point click, int radius) const {
     int threshold = std::max(radius / 6, 12);
     int dmin = cvRound(cv::norm(click - pt_min_));
     int dmax = cvRound(cv::norm(click - pt_max_));
@@ -442,7 +442,7 @@ int GaugeDetector::HitTestMarker(cv::Point click, int radius) const {
     return kMarkerNone;
 }
 
-void GaugeDetector::MoveMarkerToPerimeter(int which, cv::Point click) {
+void CircularGauge::MoveMarkerToPerimeter(int which, cv::Point click) {
     cv::Point vec = click - gauge_.center;
     double dist = cv::norm(vec);
     if (dist < 1.0) return;

@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "gauge_detector.h"
+#include "circular_gauge.h"
 
 struct GaugeCalibData {
     double value = 0;
@@ -78,8 +78,8 @@ private:
 
     cv::Mat firstFrame_;
     cv::Mat calibFrame_;
-    std::vector<GaugeDetector> detectors_;
-    std::vector<GaugeROI> detectedGauges_;
+    std::vector<CircularGauge::ROI> detectedCircularROIs_;
+    std::vector<CircularGauge> circularGauges_;
     size_t currentGaugeIdx_ = 0;
     bool manualPending_ = false;
     cv::Point manualCenter_;
@@ -92,7 +92,7 @@ private:
 
     AppMode mode_ = AppMode::kDetection;
     bool quit_ = false;
-    int draggingMarker_ = GaugeDetector::kMarkerNone;
+    int draggingMarker_ = CircularGauge::kMarkerNone;
 
     QBasicTimer chainTimer_;
     QVector<GaugeCalibData> calibData_;
