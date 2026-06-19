@@ -14,7 +14,7 @@
 #include "worker.h"
 
 struct GaugeSectionWidgets {
-    ui::Section* section = nullptr;
+    ui::QCollapsibleSection* section = nullptr;
     QDoubleSpinBox* minSpin = nullptr;
     QDoubleSpinBox* maxSpin = nullptr;
 };
@@ -36,7 +36,7 @@ void rebuildGaugeSections(
 
     for (int i = 0; i < calib.size(); i++) {
         QString colorName = QString("#%1").arg(calib[i].colorRgb, 6, 16, QChar('0'));
-        auto* sec = new ui::Section(
+        auto* sec = new ui::QCollapsibleSection(
             QString("Gauge %1: %2").arg(i + 1).arg(calib[i].value, 0, 'f', 2),
             0, scrollContent);
         sec->setStyleSheet(

@@ -29,10 +29,10 @@
 
 namespace ui
 {
-    class Section : public QWidget
+    class QCollapsibleSection : public QWidget
     {
         Q_OBJECT
-        Q_DISABLE_COPY_MOVE(Section)
+        Q_DISABLE_COPY_MOVE(QCollapsibleSection)
         
     private:
         QGridLayout* mainLayout;
@@ -51,7 +51,7 @@ namespace ui
         static const int DEFAULT_DURATION = 0;
     
         // initialize section
-        explicit Section(const QString& title = "", const int animationDuration = DEFAULT_DURATION, QWidget* parent = 0);
+        explicit QCollapsibleSection(const QString& title = "", const int animationDuration = DEFAULT_DURATION, QWidget* parent = 0);
 
         // set layout of content (takes ownership)
         void setContentLayout(QLayout* contentLayout);

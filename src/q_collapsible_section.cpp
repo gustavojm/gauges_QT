@@ -24,7 +24,7 @@
 #include <QDebug>
 namespace ui
 {
-    Section::Section(const QString& title, const int animationDuration, QWidget* parent)
+    QCollapsibleSection::QCollapsibleSection(const QString& title, const int animationDuration, QWidget* parent)
         : QWidget(parent), animationDuration(animationDuration)
     {
         toggleButton = new QToolButton(this);
@@ -64,10 +64,10 @@ namespace ui
         mainLayout->addWidget(contentArea, row, 0, 1, 3);
         setLayout(mainLayout);
 
-        connect(toggleButton, &QToolButton::toggled, this, &Section::toggle);
+        connect(toggleButton, &QToolButton::toggled, this, &QCollapsibleSection::toggle);
     }
 
-    void Section::toggle(bool expanded)
+    void QCollapsibleSection::toggle(bool expanded)
     {
         toggleButton->setArrowType(expanded ? Qt::ArrowType::DownArrow : Qt::ArrowType::RightArrow);
         toggleAnimation->setDirection(expanded ? QAbstractAnimation::Forward : QAbstractAnimation::Backward);
@@ -78,7 +78,7 @@ namespace ui
 
     }
 
-    void Section::setContentLayout(QLayout* contentLayout)
+    void QCollapsibleSection::setContentLayout(QLayout* contentLayout)
     {
         delete contentArea->layout();
         contentArea->setLayout(contentLayout);
@@ -87,12 +87,12 @@ namespace ui
         updateHeights();
     }
     
-    void Section::setTitle(QString title)
+    void QCollapsibleSection::setTitle(QString title)
     {
         toggleButton->setText(std::move(title));
     }
     
-    void Section::updateHeights()
+    void QCollapsibleSection::updateHeights()
     {
         int contentHeight = contentArea->layout()->sizeHint().height();
 
