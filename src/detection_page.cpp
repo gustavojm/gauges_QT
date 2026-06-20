@@ -79,12 +79,12 @@ DetectionPage::DetectionPage(QWidget* parent)
     lay->addStretch();
 }
 
-void DetectionPage::onDetectionUpdated(int numGauges) {
+void DetectionPage::onDetectionCountChanged(int numGauges) {
     gaugeCountLabel_->setText(QString("Found %1 gauge(s)").arg(numGauges));
     confirmBtn_->setVisible(numGauges > 0);
 }
 
-void DetectionPage::setManualPlacementActive(bool active) {
+void DetectionPage::onManualPlacementActivated(bool active) {
     cannyRow_->setVisible(!active);
     accRow_->setVisible(!active);
     instructionLabel_->setVisible(active);
@@ -107,10 +107,10 @@ void DetectionPage::connectToWorker(Worker* worker) {
             worker, &Worker::setAcc);
     connect(this, &DetectionPage::confirmClicked,
             worker, &Worker::confirmGauges);
-    connect(worker, &Worker::detectionUpdated,
-            this, &DetectionPage::onDetectionUpdated);
-    connect(worker, &Worker::manualPlacementActive,
-            this, &DetectionPage::setManualPlacementActive);
+    connect(worker, &Worker::detectionCountChanged,
+            this, &DetectionPage::onDetectionCountChanged);
+    connect(worker, &Worker::manualPlacementActivated,
+            this, &DetectionPage::onManualPlacementActivated);
     connect(worker, &Worker::manualInstructionChanged,
             this, &DetectionPage::onManualInstructionChanged);
 }

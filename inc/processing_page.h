@@ -22,7 +22,7 @@ public:
 public slots:
     void onFrameCountUpdated(int current, int total);
     void createCollapsibleSections(const QVector<GaugeCalibData>& calib);
-    void updateSectionValues(const QVector<GaugeCalibData>& calib);
+    void onLiveValuesUpdated(const QVector<GaugeCalibData>& calib);
 
 signals:
     void restartClicked();

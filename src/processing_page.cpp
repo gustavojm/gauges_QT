@@ -59,7 +59,7 @@ void ProcessingPage::createCollapsibleSections(const QVector<GaugeCalibData>& ca
     ::rebuildGaugeSections(sections_, sectionsLayout_, scrollContent_, calib, this);
 }
 
-void ProcessingPage::updateSectionValues(const QVector<GaugeCalibData>& calib) {
+void ProcessingPage::onLiveValuesUpdated(const QVector<GaugeCalibData>& calib) {
     for (size_t i = 0; i < sections_.size() && i < static_cast<size_t>(calib.size()); i++) {
         sections_[i].section->setTitle(
             QString("Gauge %1: %2").arg(i + 1).arg(calib[i].value, 0, 'f', 2));
@@ -73,10 +73,10 @@ void ProcessingPage::connectToWorker(Worker* worker) {
             worker, &Worker::quit);
     connect(this, &ProcessingPage::gaugeCalibRangeChanged,
             worker, &Worker::setGaugeCalibRange);
-    connect(worker, &Worker::gaugeCalibUpdated,
+    connect(worker, &Worker::calibrationDataReady,
             this, &ProcessingPage::createCollapsibleSections);
-    connect(worker, &Worker::gaugeValuesUpdated,
-            this, &ProcessingPage::updateSectionValues);
+    connect(worker, &Worker::liveValuesUpdated,
+            this, &ProcessingPage::onLiveValuesUpdated);
     connect(worker, &Worker::frameCountUpdated,
             this, &ProcessingPage::onFrameCountUpdated);
 }

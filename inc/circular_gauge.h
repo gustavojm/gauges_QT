@@ -6,23 +6,56 @@
 #include <opencv2/opencv.hpp>
 
 struct ScaleCalibration {
-    double start_angle;
-    double end_angle;
-    double min_value;
-    double max_value;
-    bool valid;
+    double start_angle = 0;
+    double end_angle = 0;
+    double min_value = 0;
+    double max_value = 1000;
+    bool valid = false;
 };
 
+// ─── Named constants ─────────────────────────────────────────────
 inline constexpr double kPi = 3.14159265358979323846;
+inline constexpr double kRadiusInset = 0.85;
 inline constexpr int kManualCenterRadius = 5;
 inline constexpr int kManualGuideRadius = 30;
-inline constexpr double kRadiusInset = 0.85;
+
+// Detection: gauge finding
+inline constexpr int kMinRadiusDivisor = 15;
+inline constexpr int kMaxRadiusDivisor = 2;
+inline constexpr int kGaussianBlurKernel = 9;
+inline constexpr double kGaussianBlurSigma = 2.0;
+inline constexpr int kHoughDpDivisor = 6;
+inline constexpr size_t kMaxCirclesToKeep = 5;
+inline constexpr double kDuplicateDistFactor = 0.3;
+
+// Detection: colored needle
+inline constexpr double kMinNeedleAreaFactor = 0.5;
+inline constexpr double kMaxCentroidDistFactor = 0.6;
+inline constexpr int kMorphKernelSize = 5;
+
+// Detection: radial needle
+inline constexpr int kRadialScanAngles = 360;
+inline constexpr double kRadialScanStartFactor = 0.08;
+inline constexpr int kAdaptiveThreshBlockSize = 25;
+inline constexpr int kAdaptiveThreshC = 8;
+inline constexpr double kNeedleDensityWeight = 0.4;
+inline constexpr double kNeedleReachWeight = 0.6;
+
+// Overlay drawing
+inline constexpr int kCircleThickness = 2;
+inline constexpr int kNeedleThickness = 3;
+inline constexpr double kNeedleLengthFactor = 0.8;
+inline constexpr int kCenterDotRadius = 5;
+inline constexpr int kCalibPtRadius = 10;
+inline constexpr int kCalibPtOutlineRadius = 14;
+inline constexpr int kCalibCenterDotRadius = 4;
+inline constexpr double kHitTestMinThresh = 12.0;
 
 class CircularGauge {
 
 public:
-    /* Region of Interest (the sub-area of an image that an 
-    algorithm should focus on, as opposed to processing 
+    /* Region of Interest (the sub-area of an image that an
+    algorithm should focus on, as opposed to processing
     the entire frame). */
     struct ROI {
         cv::Point center;
@@ -80,8 +113,14 @@ public:
     int HandleClick(int clickX, int clickY);
 
 private:
+    // Result of scanning a single radial line for needle detection.
+    struct RadialScanResult {
+        double density;
+        double reach;
+    };
+
     ROI roi_ = {};
-    ScaleCalibration scale_ = {0, 0, 0, 1000, false};
+    ScaleCalibration scale_;
 
     // Color
     cv::Scalar color_ = {0, 255, 0};
@@ -91,6 +130,8 @@ private:
     cv::Mat CreateMask(const cv::Mat& frame) const;
     double DetectColoredNeedle(const cv::Mat& frame) const;
     double DetectNeedleRadial(const cv::Mat& frame) const;
+    RadialScanResult ScanRadialLine(const cv::Mat& binary,
+                                    const cv::Mat& mask, double angle) const;
 
     std::deque<double> value_history_;
     const size_t smooth_window_ = 5;
@@ -106,5 +147,3 @@ private:
 enum class AppMode { kDetection, kCalibration, kProcessing };
 
 Q_DECLARE_METATYPE(AppMode)
-
-

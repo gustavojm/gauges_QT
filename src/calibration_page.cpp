@@ -57,7 +57,7 @@ void CalibrationPage::rebuildSections(const QVector<GaugeCalibData>& calib) {
     ::rebuildGaugeSections(sections_, sectionsLayout_, scrollContent_, calib, this);
 }
 
-void CalibrationPage::onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib) {
+void CalibrationPage::onCalibrationDataReady(const QVector<GaugeCalibData>& calib) {
     if (calib.isEmpty()) return;
     if (sections_.size() != static_cast<size_t>(calib.size()))
         rebuildSections(calib);
@@ -70,6 +70,6 @@ void CalibrationPage::connectToWorker(Worker* worker) {
             worker, &Worker::quit);
     connect(this, &CalibrationPage::gaugeCalibRangeChanged,
             worker, &Worker::setGaugeCalibRange);
-    connect(worker, &Worker::gaugeCalibUpdated,
-            this, &CalibrationPage::onGaugeCalibUpdated);
+    connect(worker, &Worker::calibrationDataReady,
+            this, &CalibrationPage::onCalibrationDataReady);
 }

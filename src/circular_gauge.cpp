@@ -7,10 +7,6 @@
 #include <sstream>
 #include <string>
 
-constexpr int kCircleThickness = 2;
-constexpr int kNeedleThickness = 3;
-constexpr int kCalibPtRadius = 10;
-
 int CircularGauge::next_number_ = 1;
 
 // ═══════════════════════════════════════════════════════════════════
@@ -24,19 +20,20 @@ std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
     int maxDim = std::max(gray.rows, gray.cols);
-    int minR = maxDim / 15;
-    int maxR = maxDim / 2;
+    int minR = maxDim / kMinRadiusDivisor;
+    int maxR = maxDim / kMaxRadiusDivisor;
 
     cv::Mat blurred;
-    cv::GaussianBlur(gray, blurred, cv::Size(9, 9), 2, 2);
+    cv::GaussianBlur(gray, blurred,
+                     cv::Size(kGaussianBlurKernel, kGaussianBlurKernel),
+                     kGaussianBlurSigma, kGaussianBlurSigma);
     std::vector<cv::Vec3f> allCircles;
     cv::HoughCircles(blurred, allCircles, cv::HOUGH_GRADIENT, 1.0,
-                     gray.rows / 6, cannyThreshold, accumulatorThreshold, minR,
-                     maxR);
+                     gray.rows / kHoughDpDivisor, cannyThreshold,
+                     accumulatorThreshold, minR, maxR);
 
-    constexpr size_t maxCirclesToKeep = 5;
-    if (allCircles.size() > maxCirclesToKeep)
-        allCircles.resize(maxCirclesToKeep);
+    if (allCircles.size() > kMaxCirclesToKeep)
+        allCircles.resize(kMaxCirclesToKeep);
 
     std::vector<CircularGauge::ROI> result;
     for (const auto& c : allCircles) {
@@ -44,7 +41,8 @@ std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
         int radius = cvRound(c[2]);
         bool duplicate = false;
         for (const auto& existing : result) {
-            if (cv::norm(center - existing.center) < existing.radius * 0.3) {
+            if (cv::norm(center - existing.center) <
+                existing.radius * kDuplicateDistFactor) {
                 duplicate = true;
                 break;
             }
@@ -63,7 +61,7 @@ std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
 cv::Mat CircularGauge::CreateMask(const cv::Mat& frame) const {
     cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
     cv::circle(mask, roi_.center, roi_.radius, cv::Scalar(255), -1);
-    return mask;   
+    return mask;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -83,8 +81,8 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
     cv::inRange(hsv, cv::Scalar(160, 50, 50), cv::Scalar(179, 255, 255), red2);
     cv::bitwise_or(red1, red2, redMask);
 
-    cv::Mat kernel =
-        cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
+    cv::Mat kernel = cv::getStructuringElement(
+        cv::MORPH_ELLIPSE, cv::Size(kMorphKernelSize, kMorphKernelSize));
     cv::morphologyEx(redMask, redMask, cv::MORPH_CLOSE, kernel);
     cv::morphologyEx(redMask, redMask, cv::MORPH_OPEN, kernel);
 
@@ -97,11 +95,12 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
     double bestScore = 0;
     for (size_t i = 0; i < contours.size(); i++) {
         double area = cv::contourArea(contours[i]);
-        if (area < roi_.radius * 0.5) continue;
+        if (area < roi_.radius * kMinNeedleAreaFactor) continue;
         cv::Moments m = cv::moments(contours[i]);
         if (m.m00 == 0) continue;
         cv::Point centroid(cvRound(m.m10 / m.m00), cvRound(m.m01 / m.m00));
-        if (cv::norm(centroid - roi_.center) > roi_.radius * 0.6) continue;
+        if (cv::norm(centroid - roi_.center) >
+            roi_.radius * kMaxCentroidDistFactor) continue;
         double maxDist = 0;
         for (const auto& pt : contours[i])
             maxDist = std::max(maxDist, cv::norm(pt - roi_.center));
@@ -130,6 +129,39 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
 //  Radial Needle Detection
 // ═══════════════════════════════════════════════════════════════════
 
+CircularGauge::RadialScanResult CircularGauge::ScanRadialLine(
+    const cv::Mat& binary, const cv::Mat& mask, double angle) const {
+    int startR = cvRound(roi_.radius * kRadialScanStartFactor);
+    int endR = roi_.radius;
+    int longestRun = 0, darkRun = 0, totalDark = 0, totalScan = 0;
+    bool inRun = false;
+
+    for (int r = startR; r < endR; r++) {
+        int x = cvRound(roi_.center.x + r * std::cos(angle));
+        int y = cvRound(roi_.center.y + r * std::sin(angle));
+        if (x < 0 || x >= binary.cols || y < 0 || y >= binary.rows) break;
+        if (mask.at<uchar>(y, x) == 0) break;
+        totalScan++;
+        if (binary.at<uchar>(y, x) > 0) {
+            totalDark++;
+            if (!inRun) {
+                inRun = true;
+                darkRun = 1;
+            } else {
+                darkRun++;
+            }
+            if (darkRun > longestRun) longestRun = darkRun;
+        } else {
+            inRun = false;
+        }
+    }
+    if (inRun && darkRun > longestRun) longestRun = darkRun;
+
+    double density = totalScan > 0 ? static_cast<double>(totalDark) / totalScan : 0;
+    double reach = totalScan > 0 ? static_cast<double>(longestRun) / roi_.radius : 0;
+    return {density, reach};
+}
+
 double CircularGauge::DetectNeedleRadial(const cv::Mat& frame) const {
     cv::Mat gray;
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
@@ -138,42 +170,21 @@ double CircularGauge::DetectNeedleRadial(const cv::Mat& frame) const {
     gray.copyTo(masked, mask);
 
     cv::Mat blurred;
-    cv::GaussianBlur(masked, blurred, cv::Size(5, 5), 0);
+    cv::GaussianBlur(masked, blurred,
+                     cv::Size(kMorphKernelSize, kMorphKernelSize), 0);
     cv::Mat binary;
-    cv::adaptiveThreshold(blurred, binary, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C,
-                          cv::THRESH_BINARY_INV, 25, 8);
+    cv::adaptiveThreshold(blurred, binary, 255,
+                          cv::ADAPTIVE_THRESH_GAUSSIAN_C,
+                          cv::THRESH_BINARY_INV,
+                          kAdaptiveThreshBlockSize, kAdaptiveThreshC);
 
-    int numAngles = 360;
     double bestScore = 0;
     double bestAngle = -1;
-    int startR = cvRound(roi_.radius * 0.08);
-    int endR = roi_.radius;
 
-    for (int i = 0; i < numAngles; i++) {
-        double angle = 2.0 * kPi * i / numAngles;
-        int longestRun = 0, darkRun = 0, totalDark = 0, totalScan = 0;
-        bool inRun = false;
-        for (int r = startR; r < endR; r++) {
-            int x = cvRound(roi_.center.x + r * std::cos(angle));
-            int y = cvRound(roi_.center.y + r * std::sin(angle));
-            if (x < 0 || x >= binary.cols || y < 0 || y >= binary.rows) break;
-            if (mask.at<uchar>(y, x) == 0) break;
-            totalScan++;
-            if (binary.at<uchar>(y, x) > 0) {
-                totalDark++;
-                if (!inRun) {
-                    inRun = true;
-                    darkRun = 1;
-                } else
-                    darkRun++;
-                if (darkRun > longestRun) longestRun = darkRun;
-            } else
-                inRun = false;
-        }
-        if (inRun && darkRun > longestRun) longestRun = darkRun;
-        double density = totalScan > 0 ? (double)totalDark / totalScan : 0;
-        double reach = totalScan > 0 ? (double)longestRun / roi_.radius : 0;
-        double score = density * 0.4 + reach * 0.6;
+    for (int i = 0; i < kRadialScanAngles; i++) {
+        double angle = 2.0 * kPi * i / kRadialScanAngles;
+        auto [density, reach] = ScanRadialLine(binary, mask, angle);
+        double score = density * kNeedleDensityWeight + reach * kNeedleReachWeight;
         if (score > bestScore) {
             bestScore = score;
             bestAngle = angle;
@@ -193,7 +204,7 @@ void CircularGauge::AddReading(double value) {
         smoothed_value_ =
             std::accumulate(value_history_.begin(), value_history_.end(), 0.0) /
             value_history_.size();
-    }    
+    }
 }
 
 double CircularGauge::DetectNeedle(const cv::Mat& frame) {
@@ -278,24 +289,26 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
                 roi_.center.x + cvRound(arcR * std::cos(scale_.start_angle)),
                 roi_.center.y + cvRound(arcR * std::sin(scale_.start_angle)));
             cv::line(frame, roi_.center, startPt, cv::Scalar(0, 255, 0), 2);
-            cv::putText(frame, std::to_string((int)scale_.min_value),
+            cv::putText(frame, std::to_string(static_cast<int>(scale_.min_value)),
                         startPt + cv::Point(10, 0), cv::FONT_HERSHEY_SIMPLEX,
                         0.6, cv::Scalar(0, 255, 0), 2);
             cv::Point endPt(
                 roi_.center.x + cvRound(arcR * std::cos(scale_.end_angle)),
                 roi_.center.y + cvRound(arcR * std::sin(scale_.end_angle)));
             cv::line(frame, roi_.center, endPt, cv::Scalar(0, 0, 255), 2);
-            cv::putText(frame, std::to_string((int)scale_.max_value),
+            cv::putText(frame, std::to_string(static_cast<int>(scale_.max_value)),
                         endPt + cv::Point(10, 0), cv::FONT_HERSHEY_SIMPLEX, 0.6,
                         cv::Scalar(0, 0, 255), 2);
         }
         if (angle_ >= 0) {
-            cv::Point needleTip(roi_.center.x + cvRound(roi_.radius * 0.8 *
-                                                          std::cos(angle_)),
-                                roi_.center.y + cvRound(roi_.radius * 0.8 *
-                                                          std::sin(angle_)));
-            cv::line(frame, roi_.center, needleTip, cv::Scalar(255, 0, 0), 3);
-            cv::circle(frame, roi_.center, 5, color_, -1);
+            cv::Point needleTip(
+                roi_.center.x + cvRound(roi_.radius * kNeedleLengthFactor *
+                                        std::cos(angle_)),
+                roi_.center.y + cvRound(roi_.radius * kNeedleLengthFactor *
+                                        std::sin(angle_)));
+            cv::line(frame, roi_.center, needleTip,
+                     cv::Scalar(255, 0, 0), kNeedleThickness);
+            cv::circle(frame, roi_.center, kCenterDotRadius, color_, -1);
         }
     }
 
@@ -317,7 +330,8 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) const {
     int thickness = 1;
     int arcR = cvRound(roi_.radius * kRadiusInset);
 
-    cv::circle(frame, roi_.center, 4, cv::Scalar(255, 255, 255), -1);
+    cv::circle(frame, roi_.center, kCalibCenterDotRadius,
+               cv::Scalar(255, 255, 255), -1);
 
     cv::Point vecMin = pt_min_ - roi_.center;
     cv::Point vecMax = pt_max_ - roi_.center;
@@ -339,13 +353,15 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) const {
     cv::ellipse(frame, roi_.center, cv::Size(arcR, arcR), 0, a0, a1,
                 cv::Scalar(0, 255, 255), thickness);
 
-    cv::circle(frame, ptMinIn, 10, cv::Scalar(0, 255, 0), -1);
-    cv::circle(frame, ptMinIn, 14, cv::Scalar(0, 255, 0), thickness);
+    cv::circle(frame, ptMinIn, kCalibPtRadius, cv::Scalar(0, 255, 0), -1);
+    cv::circle(frame, ptMinIn, kCalibPtOutlineRadius,
+               cv::Scalar(0, 255, 0), thickness);
     cv::putText(frame, "min", ptMinIn + cv::Point(12, 4),
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
 
-    cv::circle(frame, ptMaxIn, 10, cv::Scalar(0, 0, 255), -1);
-    cv::circle(frame, ptMaxIn, 14, cv::Scalar(0, 0, 255), thickness);
+    cv::circle(frame, ptMaxIn, kCalibPtRadius, cv::Scalar(0, 0, 255), -1);
+    cv::circle(frame, ptMaxIn, kCalibPtOutlineRadius,
+               cv::Scalar(0, 0, 255), thickness);
     cv::putText(frame, "max", ptMaxIn + cv::Point(12, 4),
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
 }
@@ -369,9 +385,7 @@ cv::Scalar CircularGauge::NextColor() {
 }
 
 int CircularGauge::HandleClick(int clickX, int clickY) {
-    // kMarkerMin if click is near pt_min_, kMarkerMax if near pt_max_,
-    // or kMarkerNone otherwise.  (threshold = radius/6)
-    int thresh = std::max(roi_.radius / 6, 12);
+    int thresh = std::max(roi_.radius / 6, static_cast<int>(kHitTestMinThresh));
     cv::Point center = roi_.center;
     cv::Point vecMin = pt_min_ - center;
     cv::Point vecMax = pt_max_ - center;
@@ -404,7 +418,7 @@ void CircularGauge::DrawGaugeNumber(cv::Mat& img) const {
 
 void CircularGauge::DrawOutline(cv::Mat& img) const {
     if (roi_.radius <= 0) return;
-    cv::circle(img, roi_.center, roi_.radius, color_, 2);
+    cv::circle(img, roi_.center, roi_.radius, color_, kCircleThickness);
     DrawGaugeNumber(img);
 }
 

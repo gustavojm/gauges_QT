@@ -20,7 +20,7 @@ public:
     void connectToWorker(class Worker* worker);
 
 public slots:
-    void onGaugeCalibUpdated(const QVector<GaugeCalibData>& calib);
+    void onCalibrationDataReady(const QVector<GaugeCalibData>& calib);
 
 signals:
     void confirmCalibClicked();

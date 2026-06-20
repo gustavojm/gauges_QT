@@ -16,8 +16,8 @@ public:
     void connectToWorker(class Worker* worker);
 
 public slots:
-    void onDetectionUpdated(int numGauges);
-    void setManualPlacementActive(bool active);
+    void onDetectionCountChanged(int numGauges);
+    void onManualPlacementActivated(bool active);
     void onManualInstructionChanged(bool centerStage);
 
 signals:
