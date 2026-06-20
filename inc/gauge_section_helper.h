@@ -19,8 +19,14 @@ struct GaugeSectionWidgets {
     QDoubleSpinBox* maxSpin = nullptr;
 };
 
+inline QString gaugeTitle(int index, double value) {
+    return QString("Gauge %1: %2")
+        .arg(index + 1)
+        .arg(value, 0, 'f', 2);
+}
+
 template<typename Page>
-void rebuildGaugeSections(
+void rebuildCollapsibleSections(
     std::vector<GaugeSectionWidgets>& sections,
     QVBoxLayout* sectionsLayout,
     QWidget* scrollContent,
@@ -35,14 +41,13 @@ void rebuildGaugeSections(
     }
 
     for (int i = 0; i < calib.size(); i++) {
-        QString colorName = QString("#%1").arg(calib[i].colorRgb, 6, 16, QChar('0'));
         auto* sec = new ui::QCollapsibleSection(
-            QString("Gauge %1: %2").arg(i + 1).arg(calib[i].value, 0, 'f', 2),
+            gaugeTitle(i, calib[i].value),
             0, scrollContent);
+        sec->setColorSwatch("\u25A0", QColor::fromRgb(calib[i].colorRgb));
         sec->setStyleSheet(
-            QString("ui--Section { background: #2a2a32; border-radius: 4px; }"
-                    "ui--Section QToolButton { color: %1; }")
-                .arg(colorName));
+            "ui--QCollapsibleSection { background: #2a2a32; border-radius: 4px; }"
+            "ui--QCollapsibleSection QToolButton { color: black; }");
 
         auto* cl = new QVBoxLayout();
         cl->setContentsMargins(8, 4, 8, 8);

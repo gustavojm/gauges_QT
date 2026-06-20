@@ -56,13 +56,13 @@ void ProcessingPage::onFrameCountUpdated(int current, int total) {
 }
 
 void ProcessingPage::createCollapsibleSections(const QVector<GaugeCalibData>& calib) {
-    ::rebuildGaugeSections(sections_, sectionsLayout_, scrollContent_, calib, this);
+    ::rebuildCollapsibleSections(sections_, sectionsLayout_, scrollContent_, calib, this);
 }
 
 void ProcessingPage::onLiveValuesUpdated(const QVector<GaugeCalibData>& calib) {
     for (size_t i = 0; i < sections_.size() && i < static_cast<size_t>(calib.size()); i++) {
         sections_[i].section->setTitle(
-            QString("Gauge %1: %2").arg(i + 1).arg(calib[i].value, 0, 'f', 2));
+            gaugeTitle(i, calib[i].value));
     }
 }
 

@@ -28,10 +28,16 @@ namespace ui
         : QWidget(parent), animationDuration(animationDuration)
     {
         toggleButton = new QToolButton(this);
+        colorLabel = new QLabel(this);
         headerLine = new QFrame(this);
         toggleAnimation = new QParallelAnimationGroup(this);
         contentArea = new QScrollArea(this);
         mainLayout = new QGridLayout(this);
+
+        colorLabel->setFixedWidth(16);
+        colorLabel->setAlignment(Qt::AlignCenter);
+        colorLabel->setText("\u25A0");
+        colorLabel->setStyleSheet("background: transparent;");
 
         toggleButton->setStyleSheet("QToolButton {border: none;}");
         toggleButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -59,7 +65,8 @@ namespace ui
         mainLayout->setContentsMargins(0, 0, 0, 0);
 
         int row = 0;
-        mainLayout->addWidget(toggleButton, row, 0, 1, 1, Qt::AlignLeft);
+        mainLayout->addWidget(colorLabel, row, 0, 1, 1, Qt::AlignCenter);
+        mainLayout->addWidget(toggleButton, row, 1, 1, 1, Qt::AlignLeft);
         mainLayout->addWidget(headerLine, row++, 2, 1, 1);
         mainLayout->addWidget(contentArea, row, 0, 1, 3);
         setLayout(mainLayout);
@@ -88,6 +95,12 @@ namespace ui
     void QCollapsibleSection::setTitle(QString title)
     {
         toggleButton->setText(std::move(title));
+    }
+
+    void QCollapsibleSection::setColorSwatch(const QString& swatch, const QColor& color)
+    {
+        colorLabel->setText(swatch);
+        colorLabel->setStyleSheet(QString("color: %1; background: transparent; font-size: 14px;").arg(color.name()));
     }
     
     void QCollapsibleSection::updateHeights()

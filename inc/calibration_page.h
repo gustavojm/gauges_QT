@@ -28,7 +28,7 @@ signals:
     void gaugeCalibRangeChanged(int idx, double minVal, double maxVal);
 
 private:
-    void rebuildSections(const QVector<GaugeCalibData>& calib);
+    void rebuildCollapsibleSections(const QVector<GaugeCalibData>& calib);
 
     QLabel* calibInstruction_ = nullptr;
     QScrollArea* scrollArea_ = nullptr;

@@ -22,6 +22,7 @@
 
 #include <QFrame>
 #include <QGridLayout>
+#include <QLabel>
 #include <QParallelAnimationGroup>
 #include <QScrollArea>
 #include <QToolButton>
@@ -36,6 +37,7 @@ namespace ui
         
     private:
         QGridLayout* mainLayout;
+        QLabel* colorLabel;
         QToolButton* toggleButton;
         QFrame* headerLine;
         QParallelAnimationGroup* toggleAnimation;
@@ -58,6 +60,9 @@ namespace ui
         
         // set title
         void setTitle(QString title);
+
+        // set color swatch (a single character like ■)
+        void setColorSwatch(const QString& swatch, const QColor& color);
         
         // update animations and their heights
         void updateHeights();

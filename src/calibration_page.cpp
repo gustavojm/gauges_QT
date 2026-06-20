@@ -53,14 +53,14 @@ CalibrationPage::CalibrationPage(QWidget* parent)
     lay->addWidget(calBtnRow);
 }
 
-void CalibrationPage::rebuildSections(const QVector<GaugeCalibData>& calib) {
-    ::rebuildGaugeSections(sections_, sectionsLayout_, scrollContent_, calib, this);
+void CalibrationPage::rebuildCollapsibleSections(const QVector<GaugeCalibData>& calib) {
+    ::rebuildCollapsibleSections(sections_, sectionsLayout_, scrollContent_, calib, this);
 }
 
 void CalibrationPage::onCalibrationDataReady(const QVector<GaugeCalibData>& calib) {
     if (calib.isEmpty()) return;
     if (sections_.size() != static_cast<size_t>(calib.size()))
-        rebuildSections(calib);
+        rebuildCollapsibleSections(calib);
 }
 
 void CalibrationPage::connectToWorker(Worker* worker) {
