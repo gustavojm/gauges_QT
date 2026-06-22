@@ -96,7 +96,11 @@ void Worker::displayDetectionOverlay() {
     cv::Mat disp = firstFrame_.clone();
     const cv::Scalar color = {0, 0, 255};
     for (const auto& roi : det_.rois) {
-        cv::circle(disp, roi.center, roi.radius, color, 2);
+        if (roi.hasEllipse) {
+            cv::ellipse(disp, roi.ellipse, color, 2);
+        } else {
+            cv::circle(disp, roi.center, roi.radius, color, 2);
+        }
         cv::putText(disp, std::to_string(roi.radius),
                     roi.center + cv::Point(-20, 5),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1);
@@ -293,8 +297,13 @@ void Worker::confirmGauges() {
         const auto& g = det_.rois[i];
         circularGauges_.emplace_back(g.center, g.radius, CircularGauge::NextColor());
 
-        // Apply homography if one was computed for this gauge
-        if (i < det_.homographies.size()) {
+        // Use homography from ROI (auto-detected) if available
+        if (!g.H.empty()) {
+            circularGauges_.back().SetHomography(g.H, g.outSize,
+                                                  g.center, g.ellipse);
+        }
+        // Otherwise use manual homography if one was computed
+        else if (i < det_.homographies.size()) {
             const auto& hd = det_.homographies[i];
             circularGauges_.back().SetHomography(hd.H, hd.outSize,
                                                   hd.center, hd.ellipseRect);

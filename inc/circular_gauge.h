@@ -24,7 +24,6 @@ inline constexpr int kMinRadiusDivisor = 15;
 inline constexpr int kMaxRadiusDivisor = 2;
 inline constexpr int kGaussianBlurKernel = 9;
 inline constexpr double kGaussianBlurSigma = 2.0;
-inline constexpr int kHoughDpDivisor = 6;
 inline constexpr size_t kMaxCirclesToKeep = 5;
 inline constexpr double kDuplicateDistFactor = 0.3;
 
@@ -68,6 +67,10 @@ public:
     struct ROI {
         cv::Point center;
         int radius;
+        cv::RotatedRect ellipse;  // from fitEllipse; valid when hasEllipse is true
+        bool hasEllipse = false;
+        cv::Mat H;                // homography from ellipse (if computed)
+        cv::Size outSize;
     };
 
     CircularGauge() noexcept = default;
@@ -87,6 +90,10 @@ public:
                                   cv::Mat& H, cv::Size& outSize,
                                   cv::RotatedRect& ellipseRect,
                                   cv::Point& inferredCenter);
+    // Compute homography directly from a fitted ellipse (used by auto-detection)
+    static bool HomographyFromEllipse(const cv::RotatedRect& rr,
+                                      cv::Mat& H, cv::Size& outSize,
+                                      cv::Point& inferredCenter);
     void SetHomography(const cv::Mat& H, const cv::Size& outSize,
                        cv::Point center, cv::RotatedRect ellipseRect = {});
     cv::Mat WarpFrame(const cv::Mat& frame) const;

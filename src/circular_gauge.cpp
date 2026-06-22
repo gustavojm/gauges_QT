@@ -15,42 +15,92 @@ int CircularGauge::next_number_ = 1;
 
 std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
                                                 int cannyThreshold,
-                                                int accumulatorThreshold) {
+                                                int /*accumulatorThreshold*/) {
     cv::Mat gray;
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
     int maxDim = std::max(gray.rows, gray.cols);
-    int minR = maxDim / kMinRadiusDivisor;
-    int maxR = maxDim / kMaxRadiusDivisor;
+    double minArea = static_cast<double>(maxDim * maxDim) /
+                     (kMinRadiusDivisor * kMinRadiusDivisor) * kPi;
+    double maxArea = static_cast<double>(maxDim * maxDim) /
+                     (kMaxRadiusDivisor * kMaxRadiusDivisor) * kPi;
 
     cv::Mat blurred;
     cv::GaussianBlur(gray, blurred,
                      cv::Size(kGaussianBlurKernel, kGaussianBlurKernel),
                      kGaussianBlurSigma, kGaussianBlurSigma);
-    std::vector<cv::Vec3f> allCircles;
-    cv::HoughCircles(blurred, allCircles, cv::HOUGH_GRADIENT, 1.0,
-                     gray.rows / kHoughDpDivisor, cannyThreshold,
-                     accumulatorThreshold, minR, maxR);
 
-    if (allCircles.size() > kMaxCirclesToKeep)
-        allCircles.resize(kMaxCirclesToKeep);
+    cv::Mat edges;
+    cv::Canny(blurred, edges, cannyThreshold, cannyThreshold / 2);
 
+    // Dilate to close small gaps in contours
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
+    cv::dilate(edges, edges, kernel);
+
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(edges, contours, cv::RETR_LIST,
+                     cv::CHAIN_APPROX_SIMPLE);
+
+    // Fit ellipses to qualifying contours
+    struct Candidate {
+        cv::Point center;
+        int radius;
+        double area;
+        cv::RotatedRect ellipse;
+        cv::Mat H;
+        cv::Size outSize;
+    };
+    std::vector<Candidate> candidates;
+
+    for (const auto& cnt : contours) {
+        if (cnt.size() < 5) continue;
+
+        cv::RotatedRect rr = cv::fitEllipse(cnt);
+        float a = rr.size.width * 0.5f;
+        float b = rr.size.height * 0.5f;
+        if (a < 1.0f || b < 1.0f) continue;
+
+        // Reject very elongated ellipses (aspect ratio > 3:1)
+        float major = std::max(a, b);
+        float minor = std::min(a, b);
+        if (major / minor > 3.0f) continue;
+
+        double area = cv::contourArea(cnt);
+        if (area < minArea || area > maxArea) continue;
+
+        // Compute homography from the fitted ellipse
+        cv::Mat H;
+        cv::Size outSize;
+        cv::Point center;
+        if (!HomographyFromEllipse(rr, H, outSize, center)) continue;
+
+        candidates.push_back({center, cvRound(major), area, rr, H, outSize});
+    }
+
+    // Sort by area descending, keep largest
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Candidate& a, const Candidate& b) {
+                  return a.area > b.area;
+              });
+
+    // Deduplicate: collapse candidates whose centers are close
     std::vector<CircularGauge::ROI> result;
-    for (const auto& c : allCircles) {
-        cv::Point center(cvRound(c[0]), cvRound(c[1]));
-        int radius = cvRound(c[2]);
+    for (const auto& c : candidates) {
         bool duplicate = false;
         for (const auto& existing : result) {
-            if (cv::norm(center - existing.center) <
+            if (cv::norm(c.center - existing.center) <
                 existing.radius * kDuplicateDistFactor) {
                 duplicate = true;
                 break;
             }
         }
         if (!duplicate) {
-            result.push_back({center, radius});
+            result.push_back({c.center, c.radius, c.ellipse, true,
+                              c.H, c.outSize});
         }
+        if (result.size() >= kMaxCirclesToKeep) break;
     }
+
     return result;
 }
 
@@ -813,6 +863,79 @@ bool CircularGauge::ComputeHomography(const std::vector<cv::Point>& pts,
     int side = cvRound(R * 2.0);
     outSize = cv::Size(side, side);
     ellipseRect = rr;
+
+    return true;
+}
+
+bool CircularGauge::HomographyFromEllipse(const cv::RotatedRect& rr,
+                                          cv::Mat& H, cv::Size& outSize,
+                                          cv::Point& inferredCenter) {
+    float a = rr.size.width * 0.5f;
+    float b = rr.size.height * 0.5f;
+    if (a < 1.0f || b < 1.0f) return false;
+
+    float cx = rr.center.x;
+    float cy = rr.center.y;
+    inferredCenter = cv::Point(cvRound(cx), cvRound(cy));
+
+    bool swapped = false;
+    if (a < b) { std::swap(a, b); swapped = true; }
+
+    double theta = rr.angle * kPi / 180.0;
+    if (swapped) theta += kPi / 2.0;
+
+    double cosT = std::cos(theta), sinT = std::sin(theta);
+    double invA2 = 1.0 / (a * a);
+    double invB2 = 1.0 / (b * b);
+
+    double M00 = cosT * cosT * invA2 + sinT * sinT * invB2;
+    double M01 = cosT * sinT * (invA2 - invB2);
+    double M11 = sinT * sinT * invA2 + cosT * cosT * invB2;
+
+    double trace = M00 + M11;
+    double detM = M00 * M11 - M01 * M01;
+    double disc = std::sqrt(std::max(0.0, trace * trace * 0.25 - detM));
+    double lamBig = trace * 0.5 + disc;
+    double lamSmall = trace * 0.5 - disc;
+    if (lamSmall < 1e-15) return false;
+
+    double ex, ey;
+    if (std::abs(M01) > 1e-15) {
+        ex = lamSmall - M11;
+        ey = M01;
+    } else if (std::abs(M00 - lamSmall) > std::abs(M11 - lamSmall)) {
+        ex = M01;
+        ey = lamSmall - M00;
+    } else {
+        ex = 1.0;
+        ey = 0.0;
+    }
+    double len = std::sqrt(ex * ex + ey * ey);
+    if (len < 1e-15) return false;
+    ex /= len;
+    ey /= len;
+
+    double s1 = std::sqrt(lamBig);
+    double s2 = std::sqrt(lamSmall);
+
+    double h00 = s1 * ey * ey + s2 * ex * ex;
+    double h01 = (s2 - s1) * ex * ey;
+    double h10 = h01;
+    double h11 = s1 * ex * ex + s2 * ey * ey;
+
+    // R = average of semi-axes (circle radius in rectified space)
+    double R = (a + b) * 0.5;
+
+    H = cv::Mat::eye(3, 3, CV_64F);
+    H.at<double>(0, 0) = R * h00;
+    H.at<double>(0, 1) = R * h01;
+    H.at<double>(0, 2) = R * (1.0 - h00 * cx - h01 * cy);
+    H.at<double>(1, 0) = R * h10;
+    H.at<double>(1, 1) = R * h11;
+    H.at<double>(1, 2) = R * (1.0 - h10 * cx - h11 * cy);
+
+    int side = cvRound(R * 2.0);
+    outSize = cv::Size(side, side);
 
     return true;
 }
