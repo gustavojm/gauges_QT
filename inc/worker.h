@@ -25,11 +25,25 @@ Q_DECLARE_METATYPE(GaugeCalibData)
 
 struct DetectionState {
     std::vector<CircularGauge::ROI> rois;
-    bool manualPending = false;
-    cv::Point manualCenter;
     bool manualPlacement = false;
     int canny = 320;
     int acc = 40;
+
+    // 3-click manual placement state
+    enum class ManualStage { kCenter, kEdge1, kEdge2 };
+    ManualStage manualStage = ManualStage::kCenter;
+    cv::Point manualCenter;
+    cv::Point manualEdge1;
+    cv::Point manualEdge2;
+
+    // Per-gauge homography data (parallels rois vector)
+    struct HomographyData {
+        cv::Mat H;
+        cv::Size outSize;
+        cv::Point center;
+        cv::RotatedRect ellipseRect;
+    };
+    std::vector<HomographyData> homographies;
 };
 
 struct CalibrationState {
@@ -53,7 +67,7 @@ signals:
     void detectionCountChanged(int numGauges);
     void modeChanged(AppMode mode);
     void manualPlacementActivated(bool active);
-    void manualInstructionChanged(bool centerStage);
+    void manualInstructionChanged(int stage);
     void finished();
 
 public slots:

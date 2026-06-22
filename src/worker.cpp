@@ -112,10 +112,13 @@ void Worker::reRunDetection() {
 
 void Worker::setManualPlacement(bool enabled) {
     det_.manualPlacement = enabled;
-    if (!enabled && mode_ == AppMode::kDetection)
+    if (enabled) {
+        det_.manualStage = DetectionState::ManualStage::kCenter;
+        emit manualInstructionChanged(0);
+    } else if (mode_ == AppMode::kDetection) {
         reRunDetection();
+    }
     emit manualPlacementActivated(enabled);
-    emit manualInstructionChanged(enabled);
 }
 
 void Worker::setCanny(int value) {
@@ -144,31 +147,87 @@ void Worker::onImageClicked(int x, int y) {
 }
 
 void Worker::handleDetectionClick(int x, int y) {
-    if (!det_.manualPending) {
-        det_.manualCenter = cv::Point(x, y);
-        det_.manualPending = true;
+    cv::Point click(x, y);
+
+    if (det_.manualStage == DetectionState::ManualStage::kCenter) {
+        det_.manualCenter = click;
+        det_.manualStage = DetectionState::ManualStage::kEdge1;
+        emit manualInstructionChanged(1);
+
+    } else if (det_.manualStage == DetectionState::ManualStage::kEdge1) {
+        det_.manualEdge1 = click;
+        det_.manualStage = DetectionState::ManualStage::kEdge2;
+        emit manualInstructionChanged(2);
+
     } else {
-        int r = cvRound(cv::norm(cv::Point(x, y) - det_.manualCenter));
-        det_.rois.push_back({det_.manualCenter, r});
-        std::cout << "  >> Manual gauge at ("
-                  << det_.manualCenter.x << ", " << det_.manualCenter.y
-                  << "), radius=" << r << "\n";
-        det_.manualPending = false;
+        det_.manualEdge2 = click;
+
+        // Compute homography from center + 2 edge points
+        cv::Mat H;
+        cv::Size outSize;
+        cv::RotatedRect ellipseRect;
+        if (CircularGauge::ComputeHomography(det_.manualCenter, det_.manualEdge1,
+                                             det_.manualEdge2, H, outSize,
+                                             ellipseRect)) {
+            int r = cvRound(std::min(outSize.width, outSize.height) * 0.5);
+            det_.rois.push_back({det_.manualCenter, r});
+            det_.homographies.push_back(
+                {H, outSize, det_.manualCenter, ellipseRect});
+
+            std::cout << "  >> Manual gauge at ("
+                      << det_.manualCenter.x << ", "
+                      << det_.manualCenter.y
+                      << "), warped to " << outSize.width << "x"
+                      << outSize.height << "\n";
+        } else {
+            std::cerr << "  >> Homography computation failed — "
+                         "are the points collinear?\n";
+        }
+
+        det_.manualStage = DetectionState::ManualStage::kCenter;
+        emit manualInstructionChanged(0);
     }
 
+    // Draw overlay
     cv::Mat disp = firstFrame_.clone();
     int label = 1;
-    for (const auto& g : det_.rois) {
-        cv::circle(disp, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
+    for (size_t i = 0; i < det_.rois.size(); i++) {
+        const auto& g = det_.rois[i];
+        if (i < det_.homographies.size()) {
+            // Draw the inferred ellipse
+            const auto& hd = det_.homographies[i];
+            cv::ellipse(disp, hd.ellipseRect, cv::Scalar(0, 255, 0), 2,
+                        cv::LINE_AA);
+        } else {
+            cv::circle(disp, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
+        }
         cv::putText(disp, std::to_string(label++),
                     g.center - cv::Point(8, 8),
                     cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
     }
-    cv::circle(disp, det_.manualCenter, kManualCenterRadius,
-               cv::Scalar(0, 255, 255), -1);
-    drawDashedCircle(disp, det_.manualCenter, kManualGuideRadius,
-                     cv::Scalar(0, 255, 255), 1);
-    emit manualInstructionChanged(!det_.manualPending);
+
+    // Draw current stage markers
+    if (det_.manualStage == DetectionState::ManualStage::kCenter) {
+        cv::circle(disp, click, kManualCenterRadius,
+                   cv::Scalar(0, 255, 255), -1);
+        drawDashedCircle(disp, click, kManualGuideRadius,
+                         cv::Scalar(0, 255, 255), 1);
+    } else {
+        // Center already placed — show it
+        cv::circle(disp, det_.manualCenter, kManualCenterRadius,
+                   cv::Scalar(0, 255, 255), -1);
+        drawDashedCircle(disp, det_.manualCenter, kManualGuideRadius,
+                         cv::Scalar(0, 255, 255), 1);
+
+        if (det_.manualStage == DetectionState::ManualStage::kEdge2) {
+            // Edge1 already placed — draw line from center to edge1
+            cv::line(disp, det_.manualCenter, det_.manualEdge1,
+                     cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
+            cv::circle(disp, det_.manualEdge1, kManualCenterRadius,
+                       cv::Scalar(0, 200, 255), -1);
+        }
+    }
+
     emit frameReady(matToQImage(disp));
     emit detectionCountChanged(det_.rois.size());
 }
@@ -243,13 +302,24 @@ void Worker::confirmGauges() {
         return;
 
     circularGauges_.clear();
-    for (const auto& g : det_.rois) {
+    for (size_t i = 0; i < det_.rois.size(); i++) {
+        const auto& g = det_.rois[i];
         circularGauges_.emplace_back(g.center, g.radius, CircularGauge::NextColor());
+
+        // Apply homography if one was computed for this gauge
+        if (i < det_.homographies.size()) {
+            const auto& hd = det_.homographies[i];
+            circularGauges_.back().SetHomography(hd.H, hd.outSize, hd.center);
+        }
+
         std::cout << "  >> Gauge " << (circularGauges_.size() - 1)
                   << " at (" << g.center.x << ", " << g.center.y
-                  << "), radius=" << g.radius << "\n";
+                  << "), radius=" << g.radius
+                  << (circularGauges_.back().hasHomography() ?
+                          " [homography]" : "") << "\n";
     }
     det_.rois.clear();
+    det_.homographies.clear();
     calibFrame_ = firstFrame_.clone();
     enterCalibration();
 }
@@ -308,16 +378,19 @@ void Worker::processNextFrame() {
 
     if (!frame.empty()) {
         // Initialize motion features on the first processing frame
+        // (skip for gauges that use homography-based rectification)
         if (!motionInitialized_) {
             for (auto& d : circularGauges_) {
-                d.InitMotionFeatures(frame);
+                if (!d.hasHomography())
+                    d.InitMotionFeatures(frame);
             }
             motionInitialized_ = true;
         }
 
         int labelY = 60;
         for (auto& d : circularGauges_) {
-            d.UpdateROI(frame);
+            if (!d.hasHomography())
+                d.UpdateROI(frame);
             d.DetectNeedle(frame);
             d.DrawOverlay(frame, labelY);
             labelY += 30;

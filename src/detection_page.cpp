@@ -91,11 +91,20 @@ void DetectionPage::onManualPlacementActivated(bool active) {
     if (!active) instructionLabel_->clear();
 }
 
-void DetectionPage::onManualInstructionChanged(bool centerStage) {
-    if (centerStage)
+void DetectionPage::onManualInstructionChanged(int stage) {
+    switch (stage) {
+    case 0:
         instructionLabel_->setText("Click on the CENTER of the gauge");
-    else
-        instructionLabel_->setText("Now click on the EDGE of the gauge face");
+        break;
+    case 1:
+        instructionLabel_->setText(
+            "Now click on a point on the EDGE of the gauge face");
+        break;
+    case 2:
+        instructionLabel_->setText(
+            "Now click on a second point on the EDGE of the gauge face");
+        break;
+    }
 }
 
 void DetectionPage::connectToWorker(Worker* worker) {

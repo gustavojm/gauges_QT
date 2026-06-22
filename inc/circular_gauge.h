@@ -78,6 +78,19 @@ public:
                                             int cannyThreshold,
                                             int accumulatorThreshold);
 
+    // ─── Ellipse-to-Circle Homography ───────────────────────────────
+    // From center + 2 edge points, compute a homography that maps
+    // the gauge ellipse to a frontal circle.
+    static bool ComputeHomography(cv::Point center, cv::Point p1, cv::Point p2,
+                                  cv::Mat& H, cv::Size& outSize,
+                                  cv::RotatedRect& ellipseRect);
+    void SetHomography(const cv::Mat& H, const cv::Size& outSize,
+                       cv::Point center);
+    cv::Mat WarpFrame(const cv::Mat& frame) const;
+    bool hasHomography() const { return hasHomography_; }
+    const cv::Mat& homography() const { return homography_; }
+    const cv::Size& warpSize() const { return warpSize_; }
+
     // ─── Needle Detection ───────────────────────────────────────────
     double DetectNeedle(const cv::Mat& frame);
 
@@ -141,6 +154,7 @@ private:
     cv::Point pt_min_, pt_max_;
 
     cv::Mat CreateMask(const cv::Mat& frame) const;
+    cv::Point detectionCenter() const;
     double DetectColoredNeedle(const cv::Mat& frame) const;
     double DetectNeedleRadial(const cv::Mat& frame) const;
     RadialScanResult ScanRadialLine(const cv::Mat& binary,
@@ -159,6 +173,12 @@ private:
     std::vector<cv::Point2f> ref_features_;   // Feature points on reference frame
     cv::Mat prev_gray_;                       // Previous frame grayscale
     std::vector<cv::Point2f> prev_features_;  // Tracked points from previous frame
+
+    // Ellipse-to-circle homography state
+    cv::Mat homography_;                      // 3×3 warp matrix (empty if unused)
+    cv::Size warpSize_;                       // Output size of warped image
+    cv::Point2f rectCenter_;                  // Center of gauge in rectified image
+    bool hasHomography_ = false;
 };
 
 // ─── Shared Types ─────────────────────────────────────────────────

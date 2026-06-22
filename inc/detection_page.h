@@ -18,7 +18,7 @@ public:
 public slots:
     void onDetectionCountChanged(int numGauges);
     void onManualPlacementActivated(bool active);
-    void onManualInstructionChanged(bool centerStage);
+    void onManualInstructionChanged(int stage);
 
 signals:
     void manualPlacementToggled(bool checked);

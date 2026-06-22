@@ -60,8 +60,15 @@ std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
 
 cv::Mat CircularGauge::CreateMask(const cv::Mat& frame) const {
     cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
-    cv::circle(mask, roi_.center, roi_.radius, cv::Scalar(255), -1);
+    cv::Point center = detectionCenter();
+    cv::circle(mask, center, roi_.radius, cv::Scalar(255), -1);
     return mask;
+}
+
+cv::Point CircularGauge::detectionCenter() const {
+    if (hasHomography_)
+        return cv::Point(cvRound(rectCenter_.x), cvRound(rectCenter_.y));
+    return roi_.center;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -72,6 +79,8 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
     cv::Mat mask = CreateMask(frame);
     cv::Mat masked;
     frame.copyTo(masked, mask);
+
+    cv::Point center = detectionCenter();
 
     cv::Mat hsv;
     cv::cvtColor(masked, hsv, cv::COLOR_BGR2HSV);
@@ -99,11 +108,11 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
         cv::Moments m = cv::moments(contours[i]);
         if (m.m00 == 0) continue;
         cv::Point centroid(cvRound(m.m10 / m.m00), cvRound(m.m01 / m.m00));
-        if (cv::norm(centroid - roi_.center) >
+        if (cv::norm(centroid - center) >
             roi_.radius * kMaxCentroidDistFactor) continue;
         double maxDist = 0;
         for (const auto& pt : contours[i])
-            maxDist = std::max(maxDist, cv::norm(pt - roi_.center));
+            maxDist = std::max(maxDist, cv::norm(pt - center));
         double score = maxDist * std::log(area + 1);
         if (score > bestScore) {
             bestScore = score;
@@ -116,13 +125,13 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
     double maxDist = 0;
     cv::Point tip;
     for (const auto& pt : contours[bestIdx]) {
-        double d = cv::norm(pt - roi_.center);
+        double d = cv::norm(pt - center);
         if (d > maxDist) {
             maxDist = d;
             tip = pt;
         }
     }
-    return std::atan2(tip.y - roi_.center.y, tip.x - roi_.center.x);
+    return std::atan2(tip.y - center.y, tip.x - center.x);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -131,14 +140,15 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
 
 CircularGauge::RadialScanResult CircularGauge::ScanRadialLine(
     const cv::Mat& binary, const cv::Mat& mask, double angle) const {
+    cv::Point center = detectionCenter();
     int startR = cvRound(roi_.radius * kRadialScanStartFactor);
     int endR = roi_.radius;
     int longestRun = 0, darkRun = 0, totalDark = 0, totalScan = 0;
     bool inRun = false;
 
     for (int r = startR; r < endR; r++) {
-        int x = cvRound(roi_.center.x + r * std::cos(angle));
-        int y = cvRound(roi_.center.y + r * std::sin(angle));
+        int x = cvRound(center.x + r * std::cos(angle));
+        int y = cvRound(center.y + r * std::sin(angle));
         if (x < 0 || x >= binary.cols || y < 0 || y >= binary.rows) break;
         if (mask.at<uchar>(y, x) == 0) break;
         totalScan++;
@@ -208,9 +218,17 @@ void CircularGauge::AddReading(double value) {
 }
 
 double CircularGauge::DetectNeedle(const cv::Mat& frame) {
-    angle_ = DetectColoredNeedle(frame);
-    if (angle_ < 0) {
-        angle_ = DetectNeedleRadial(frame);
+    if (hasHomography_) {
+        cv::Mat warped = WarpFrame(frame);
+        angle_ = DetectColoredNeedle(warped);
+        if (angle_ < 0) {
+            angle_ = DetectNeedleRadial(warped);
+        }
+    } else {
+        angle_ = DetectColoredNeedle(frame);
+        if (angle_ < 0) {
+            angle_ = DetectNeedleRadial(frame);
+        }
     }
 
     if (angle_ >= 0) {
@@ -281,8 +299,35 @@ double CircularGauge::AngleToValue(double needleAngle) const {
 
 void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
     if (roi_.radius > 0) {
-        cv::circle(frame, roi_.center, roi_.radius, color_,
-                   kCircleThickness);
+        if (hasHomography_) {
+            // When homography is active, draw the warped circle outline
+            // projected back into the original frame via inverse homography
+            cv::Mat Hinv;
+            cv::invert(homography_, Hinv);
+            int side = std::min(warpSize_.width, warpSize_.height);
+            int drawR = side / 2;
+            // Draw ~20 points around the rectified circle, warped back
+            std::vector<cv::Point2f> circlePts;
+            for (int i = 0; i < 40; i++) {
+                double a = 2.0 * kPi * i / 40.0;
+                circlePts.emplace_back(
+                    rectCenter_.x + drawR * static_cast<float>(std::cos(a)),
+                    rectCenter_.y + drawR * static_cast<float>(std::sin(a)));
+            }
+            std::vector<cv::Point2f> srcPts;
+            cv::perspectiveTransform(circlePts, srcPts, Hinv);
+            for (size_t i = 0; i < srcPts.size(); i++) {
+                size_t j = (i + 1) % srcPts.size();
+                cv::line(frame,
+                         cv::Point(cvRound(srcPts[i].x), cvRound(srcPts[i].y)),
+                         cv::Point(cvRound(srcPts[j].x), cvRound(srcPts[j].y)),
+                         color_, kCircleThickness, cv::LINE_AA);
+            }
+        } else {
+            cv::circle(frame, roi_.center, roi_.radius, color_,
+                       kCircleThickness);
+        }
+
         if (scale_.valid) {
             int arcR = cvRound(roi_.radius * kRadiusInset);
             cv::Point startPt(
@@ -301,14 +346,35 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
                         cv::Scalar(0, 0, 255), 2);
         }
         if (angle_ >= 0) {
-            cv::Point needleTip(
-                roi_.center.x + cvRound(roi_.radius * kNeedleLengthFactor *
-                                        std::cos(angle_)),
-                roi_.center.y + cvRound(roi_.radius * kNeedleLengthFactor *
-                                        std::sin(angle_)));
-            cv::line(frame, roi_.center, needleTip,
-                     cv::Scalar(255, 0, 0), kNeedleThickness);
-            cv::circle(frame, roi_.center, kCenterDotRadius, color_, -1);
+            if (hasHomography_) {
+                // Map needle tip from rectified space back to original frame
+                float tipX = rectCenter_.x +
+                    roi_.radius * kNeedleLengthFactor * static_cast<float>(std::cos(angle_));
+                float tipY = rectCenter_.y +
+                    roi_.radius * kNeedleLengthFactor * static_cast<float>(std::sin(angle_));
+                cv::Mat Hinv;
+                cv::invert(homography_, Hinv);
+                std::vector<cv::Point2f> src, dst;
+                src.emplace_back(rectCenter_.x, rectCenter_.y);
+                src.emplace_back(tipX, tipY);
+                cv::perspectiveTransform(src, dst, Hinv);
+                cv::line(frame,
+                         cv::Point(cvRound(dst[0].x), cvRound(dst[0].y)),
+                         cv::Point(cvRound(dst[1].x), cvRound(dst[1].y)),
+                         cv::Scalar(255, 0, 0), kNeedleThickness, cv::LINE_AA);
+                cv::circle(frame,
+                           cv::Point(cvRound(dst[0].x), cvRound(dst[0].y)),
+                           kCenterDotRadius, color_, -1);
+            } else {
+                cv::Point needleTip(
+                    roi_.center.x + cvRound(roi_.radius * kNeedleLengthFactor *
+                                            std::cos(angle_)),
+                    roi_.center.y + cvRound(roi_.radius * kNeedleLengthFactor *
+                                            std::sin(angle_)));
+                cv::line(frame, roi_.center, needleTip,
+                         cv::Scalar(255, 0, 0), kNeedleThickness);
+                cv::circle(frame, roi_.center, kCenterDotRadius, color_, -1);
+            }
         }
     }
 
@@ -447,6 +513,135 @@ void CircularGauge::MoveMarker(int which, cv::Point click) {
         pt_min_ = onCircle;
     else if (which == kMarkerMax)
         pt_max_ = onCircle;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Ellipse-to-Circle Homography
+// ═══════════════════════════════════════════════════════════════════
+
+bool CircularGauge::ComputeHomography(cv::Point center, cv::Point p1,
+                                      cv::Point p2, cv::Mat& H,
+                                      cv::Size& outSize,
+                                      cv::RotatedRect& ellipseRect) {
+    // Vectors from center to edge points
+    double u1 = p1.x - center.x;
+    double v1 = p1.y - center.y;
+    double u2 = p2.x - center.x;
+    double v2 = p2.y - center.y;
+
+    double d1 = u1 * u1 + v1 * v1;
+    double d2 = u2 * u2 + v2 * v2;
+    if (d1 < 1.0 || d2 < 1.0) return false;
+
+    // Fit ellipse: A·u² + B·u·v + C·v² = 1  (centered at origin)
+    // Two equations, three unknowns → regularize by minimizing ‖[A,B,C]‖²
+    // Lagrange multiplier solution:
+    double u1sq = u1 * u1, v1sq = v1 * v1, u1v1 = u1 * v1;
+    double u2sq = u2 * u2, v2sq = v2 * v2, u2v2 = u2 * v2;
+
+    double a11 = (d1 * d1) * 0.5;
+    double a12 = (u1sq * u2sq + u1v1 * u2v2 + v1sq * v2sq) * 0.5;
+    double a22 = (d2 * d2) * 0.5;
+
+    double det = a11 * a22 - a12 * a12;
+    if (std::abs(det) < 1e-12) return false;
+
+    double lam1 = (a22 - a12) / det;
+    double lam2 = (a11 - a12) / det;
+
+    double A = (lam1 * u1sq + lam2 * u2sq) * 0.5;
+    double B = (lam1 * u1v1 + lam2 * u2v2) * 0.5;
+    double C = (lam1 * v1sq + lam2 * v2sq) * 0.5;
+
+    // Conic matrix  M = [[A, B/2],[B/2, C]]  must be positive-definite
+    double detM = A * C - (B * 0.5) * (B * 0.5);
+    if (detM < 1e-12 || A <= 0 || C <= 0) return false;
+
+    // Eigendecomposition of M (symmetric 2×2)
+    double trace = A + C;
+    double disc = std::sqrt(std::max(0.0, trace * trace * 0.25 - detM));
+    double lamBig = trace * 0.5 + disc;   // larger eigenvalue
+    double lamSmall = trace * 0.5 - disc; // smaller eigenvalue
+    if (lamSmall < 1e-12) return false;
+
+    // Eigenvector for lamSmall (= smaller eigenvalue = semi-MAJOR axis)
+    double ex, ey;
+    if (std::abs(B * 0.5) > 1e-12 * std::max(std::abs(A - lamSmall), 1.0)) {
+        ex = -(B * 0.5);
+        ey = A - lamSmall;
+    } else {
+        ex = 1.0;
+        ey = 0.0;
+    }
+    double len = std::sqrt(ex * ex + ey * ey);
+    if (len < 1e-12) return false;
+    ex /= len;
+    ey /= len;
+
+    // Q = [v_big, v_small] where v_big = (-ey, ex), v_small = (ex, ey)
+    // H_sub = Q · diag(√lamBig, √lamSmall) · Qᵀ
+    double s1 = std::sqrt(lamBig);
+    double s2 = std::sqrt(lamSmall);
+
+    // v_big = (-ey, ex),  v_small = (ex, ey)
+    // H_sub = s1 * v_big * v_bigᵀ + s2 * v_small * v_smallᵀ
+    double h00 = s1 * ey * ey + s2 * ex * ex;
+    double h01 = (s2 - s1) * ex * ey;
+    double h10 = h01;
+    double h11 = s1 * ex * ex + s2 * ey * ey;
+
+    // Output circle radius: average of distances to the two edge points
+    double R = (std::sqrt(d1) + std::sqrt(d2)) * 0.5;
+
+    // Full homography:
+    //   H = [ R·h00,  R·h01, -R·(h00·cx + h01·cy) ]
+    //       [ R·h10,  R·h11, -R·(h10·cx + h11·cy) ]
+    //       [ 0,      0,      1                     ]
+    H = cv::Mat::eye(3, 3, CV_64F);
+    H.at<double>(0, 0) = R * h00;
+    H.at<double>(0, 1) = R * h01;
+    H.at<double>(0, 2) = R * (1.0 - h00 * center.x - h01 * center.y);
+    H.at<double>(1, 0) = R * h10;
+    H.at<double>(1, 1) = R * h11;
+    H.at<double>(1, 2) = R * (1.0 - h10 * center.x - h11 * center.y);
+
+    int side = cvRound(R * 2.0);
+    outSize = cv::Size(side, side);
+
+    // Compute RotatedRect for the fitted ellipse (for display)
+    // Eigenvalues of M give 1/a² and 1/b² where a,b are semi-axes
+    double semiMajor = 1.0 / std::sqrt(lamSmall);
+    double semiMinor = 1.0 / std::sqrt(lamBig);
+    // Ensure semiMajor >= semiMinor
+    if (semiMajor < semiMinor) std::swap(semiMajor, semiMinor);
+    float angleDeg = static_cast<float>(std::atan2(ey, ex) * 180.0 / kPi);
+    ellipseRect = cv::RotatedRect(
+        cv::Point2f(static_cast<float>(center.x), static_cast<float>(center.y)),
+        cv::Size2f(static_cast<float>(semiMajor * 2.0),
+                    static_cast<float>(semiMinor * 2.0)),
+        angleDeg);
+
+    return true;
+}
+
+void CircularGauge::SetHomography(const cv::Mat& H, const cv::Size& outSize,
+                                   cv::Point center) {
+    homography_ = H.clone();
+    warpSize_ = outSize;
+    rectCenter_ = cv::Point2f(outSize.width * 0.5f, outSize.height * 0.5f);
+    hasHomography_ = true;
+
+    // Update ROI to reflect the rectified circle
+    roi_.center = center;
+    roi_.radius = cvRound(std::min(outSize.width, outSize.height) * 0.5);
+}
+
+cv::Mat CircularGauge::WarpFrame(const cv::Mat& frame) const {
+    if (!hasHomography_ || homography_.empty()) return frame;
+    cv::Mat warped;
+    cv::warpPerspective(frame, warped, homography_, warpSize_,
+                        cv::INTER_LINEAR, cv::BORDER_REFLECT_101);
+    return warped;
 }
 
 // ═══════════════════════════════════════════════════════════════════
