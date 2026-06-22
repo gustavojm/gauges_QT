@@ -98,11 +98,15 @@ void DetectionPage::onManualInstructionChanged(int stage) {
         break;
     case 1:
         instructionLabel_->setText(
-            "Now click on a point on the EDGE of the gauge face");
+            "Now click on a point on the EDGE of the gauge face (1/3)");
         break;
     case 2:
         instructionLabel_->setText(
-            "Now click on a second point on the EDGE of the gauge face");
+            "Now click on a second point on the EDGE of the gauge face (2/3)");
+        break;
+    case 3:
+        instructionLabel_->setText(
+            "Now click on a third point on the EDGE of the gauge face (3/3)");
         break;
     }
 }

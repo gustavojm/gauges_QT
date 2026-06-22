@@ -82,10 +82,11 @@ public:
     // From center + 2 edge points, compute a homography that maps
     // the gauge ellipse to a frontal circle.
     static bool ComputeHomography(cv::Point center, cv::Point p1, cv::Point p2,
+                                  cv::Point p3,
                                   cv::Mat& H, cv::Size& outSize,
                                   cv::RotatedRect& ellipseRect);
     void SetHomography(const cv::Mat& H, const cv::Size& outSize,
-                       cv::Point center);
+                       cv::Point center, cv::RotatedRect ellipseRect = {});
     cv::Mat WarpFrame(const cv::Mat& frame) const;
     bool hasHomography() const { return hasHomography_; }
     const cv::Mat& homography() const { return homography_; }
@@ -178,6 +179,7 @@ private:
     cv::Mat homography_;                      // 3×3 warp matrix (empty if unused)
     cv::Size warpSize_;                       // Output size of warped image
     cv::Point2f rectCenter_;                  // Center of gauge in rectified image
+    cv::RotatedRect ellipseRect_;             // Fitted ellipse for drawing
     bool hasHomography_ = false;
 };
 

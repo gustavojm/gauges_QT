@@ -30,11 +30,12 @@ struct DetectionState {
     int acc = 40;
 
     // 3-click manual placement state
-    enum class ManualStage { kCenter, kEdge1, kEdge2 };
+    enum class ManualStage { kCenter, kEdge1, kEdge2, kEdge3 };
     ManualStage manualStage = ManualStage::kCenter;
     cv::Point manualCenter;
     cv::Point manualEdge1;
     cv::Point manualEdge2;
+    cv::Point manualEdge3;
 
     // Per-gauge homography data (parallels rois vector)
     struct HomographyData {

@@ -159,16 +159,21 @@ void Worker::handleDetectionClick(int x, int y) {
         det_.manualStage = DetectionState::ManualStage::kEdge2;
         emit manualInstructionChanged(2);
 
-    } else {
+    } else if (det_.manualStage == DetectionState::ManualStage::kEdge2) {
         det_.manualEdge2 = click;
+        det_.manualStage = DetectionState::ManualStage::kEdge3;
+        emit manualInstructionChanged(3);
 
-        // Compute homography from center + 2 edge points
+    } else {
+        det_.manualEdge3 = click;
+
+        // Compute homography from center + 3 edge points
         cv::Mat H;
         cv::Size outSize;
         cv::RotatedRect ellipseRect;
         if (CircularGauge::ComputeHomography(det_.manualCenter, det_.manualEdge1,
-                                             det_.manualEdge2, H, outSize,
-                                             ellipseRect)) {
+                                             det_.manualEdge2, det_.manualEdge3,
+                                             H, outSize, ellipseRect)) {
             int r = cvRound(std::min(outSize.width, outSize.height) * 0.5);
             det_.rois.push_back({det_.manualCenter, r});
             det_.homographies.push_back(
@@ -194,7 +199,6 @@ void Worker::handleDetectionClick(int x, int y) {
     for (size_t i = 0; i < det_.rois.size(); i++) {
         const auto& g = det_.rois[i];
         if (i < det_.homographies.size()) {
-            // Draw the inferred ellipse
             const auto& hd = det_.homographies[i];
             cv::ellipse(disp, hd.ellipseRect, cv::Scalar(0, 255, 0), 2,
                         cv::LINE_AA);
@@ -207,24 +211,33 @@ void Worker::handleDetectionClick(int x, int y) {
     }
 
     // Draw current stage markers
-    if (det_.manualStage == DetectionState::ManualStage::kCenter) {
-        cv::circle(disp, click, kManualCenterRadius,
+    auto drawCenterAndGuide = [&](cv::Point c) {
+        cv::circle(disp, c, kManualCenterRadius,
                    cv::Scalar(0, 255, 255), -1);
-        drawDashedCircle(disp, click, kManualGuideRadius,
+        drawDashedCircle(disp, c, kManualGuideRadius,
                          cv::Scalar(0, 255, 255), 1);
-    } else {
-        // Center already placed — show it
-        cv::circle(disp, det_.manualCenter, kManualCenterRadius,
-                   cv::Scalar(0, 255, 255), -1);
-        drawDashedCircle(disp, det_.manualCenter, kManualGuideRadius,
-                         cv::Scalar(0, 255, 255), 1);
+    };
 
-        if (det_.manualStage == DetectionState::ManualStage::kEdge2) {
-            // Edge1 already placed — draw line from center to edge1
-            cv::line(disp, det_.manualCenter, det_.manualEdge1,
-                     cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
-            cv::circle(disp, det_.manualEdge1, kManualCenterRadius,
-                       cv::Scalar(0, 200, 255), -1);
+    if (det_.manualStage == DetectionState::ManualStage::kCenter) {
+        drawCenterAndGuide(click);
+    } else {
+        // Center already placed
+        drawCenterAndGuide(det_.manualCenter);
+
+        // Draw lines and dots for placed edge points
+        auto drawEdge = [&](cv::Point e, cv::Scalar col) {
+            cv::line(disp, det_.manualCenter, e, col, 1, cv::LINE_AA);
+            cv::circle(disp, e, kManualCenterRadius, col, -1);
+        };
+
+        if (det_.manualStage == DetectionState::ManualStage::kEdge2 ||
+            det_.manualStage == DetectionState::ManualStage::kEdge3 ||
+            det_.manualStage == DetectionState::ManualStage::kCenter) {
+            drawEdge(det_.manualEdge1, cv::Scalar(0, 200, 255));
+        }
+        if (det_.manualStage == DetectionState::ManualStage::kEdge3 ||
+            det_.manualStage == DetectionState::ManualStage::kCenter) {
+            drawEdge(det_.manualEdge2, cv::Scalar(0, 200, 255));
         }
     }
 
@@ -309,7 +322,8 @@ void Worker::confirmGauges() {
         // Apply homography if one was computed for this gauge
         if (i < det_.homographies.size()) {
             const auto& hd = det_.homographies[i];
-            circularGauges_.back().SetHomography(hd.H, hd.outSize, hd.center);
+            circularGauges_.back().SetHomography(hd.H, hd.outSize, hd.center,
+                                                  hd.ellipseRect);
         }
 
         std::cout << "  >> Gauge " << (circularGauges_.size() - 1)

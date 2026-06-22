@@ -244,11 +244,26 @@ double CircularGauge::DetectNeedle(const cv::Mat& frame) {
 // ═══════════════════════════════════════════════════════════════════
 
 void CircularGauge::FinalizeCalibration() {
-    scale_.start_angle =
-        std::atan2(pt_min_.y - roi_.center.y, pt_min_.x - roi_.center.x);
-    scale_.end_angle =
-        std::atan2(pt_max_.y - roi_.center.y, pt_max_.x - roi_.center.x);
-
+    if (hasHomography_) {
+        // Map markers to rectified space to compute angles in the circle
+        std::vector<cv::Point2f> src = {
+            cv::Point2f(static_cast<float>(pt_min_.x),
+                        static_cast<float>(pt_min_.y)),
+            cv::Point2f(static_cast<float>(pt_max_.x),
+                        static_cast<float>(pt_max_.y))
+        };
+        std::vector<cv::Point2f> dst;
+        cv::perspectiveTransform(src, dst, homography_);
+        scale_.start_angle =
+            std::atan2(dst[0].y - rectCenter_.y, dst[0].x - rectCenter_.x);
+        scale_.end_angle =
+            std::atan2(dst[1].y - rectCenter_.y, dst[1].x - rectCenter_.x);
+    } else {
+        scale_.start_angle =
+            std::atan2(pt_min_.y - roi_.center.y, pt_min_.x - roi_.center.x);
+        scale_.end_angle =
+            std::atan2(pt_max_.y - roi_.center.y, pt_max_.x - roi_.center.x);
+    }
     scale_.valid = true;
 }
 
@@ -329,21 +344,56 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
         }
 
         if (scale_.valid) {
-            int arcR = cvRound(roi_.radius * kRadiusInset);
-            cv::Point startPt(
-                roi_.center.x + cvRound(arcR * std::cos(scale_.start_angle)),
-                roi_.center.y + cvRound(arcR * std::sin(scale_.start_angle)));
-            cv::line(frame, roi_.center, startPt, cv::Scalar(0, 255, 0), 2);
-            cv::putText(frame, std::to_string(static_cast<int>(scale_.min_value)),
-                        startPt + cv::Point(10, 0), cv::FONT_HERSHEY_SIMPLEX,
-                        0.6, cv::Scalar(0, 255, 0), 2);
-            cv::Point endPt(
-                roi_.center.x + cvRound(arcR * std::cos(scale_.end_angle)),
-                roi_.center.y + cvRound(arcR * std::sin(scale_.end_angle)));
-            cv::line(frame, roi_.center, endPt, cv::Scalar(0, 0, 255), 2);
-            cv::putText(frame, std::to_string(static_cast<int>(scale_.max_value)),
-                        endPt + cv::Point(10, 0), cv::FONT_HERSHEY_SIMPLEX, 0.6,
-                        cv::Scalar(0, 0, 255), 2);
+            if (hasHomography_) {
+                // Map start/end points from rectified space back to original
+                float arcR = roi_.radius * kRadiusInset;
+                float sx = rectCenter_.x + arcR * static_cast<float>(std::cos(scale_.start_angle));
+                float sy = rectCenter_.y + arcR * static_cast<float>(std::sin(scale_.start_angle));
+                float ex = rectCenter_.x + arcR * static_cast<float>(std::cos(scale_.end_angle));
+                float ey = rectCenter_.y + arcR * static_cast<float>(std::sin(scale_.end_angle));
+                cv::Mat Hinv;
+                cv::invert(homography_, Hinv);
+                std::vector<cv::Point2f> src, dst;
+                src.emplace_back(sx, sy);
+                src.emplace_back(ex, ey);
+                cv::perspectiveTransform(src, dst, Hinv);
+                cv::Point startPt(cvRound(dst[0].x), cvRound(dst[0].y));
+                cv::Point endPt(cvRound(dst[1].x), cvRound(dst[1].y));
+                cv::line(frame, roi_.center, startPt, cv::Scalar(0, 255, 0), 2);
+                cv::putText(frame,
+                            std::to_string(static_cast<int>(scale_.min_value)),
+                            startPt + cv::Point(10, 0),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                            cv::Scalar(0, 255, 0), 2);
+                cv::line(frame, roi_.center, endPt, cv::Scalar(0, 0, 255), 2);
+                cv::putText(frame,
+                            std::to_string(static_cast<int>(scale_.max_value)),
+                            endPt + cv::Point(10, 0),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                            cv::Scalar(0, 0, 255), 2);
+            } else {
+                int arcR = cvRound(roi_.radius * kRadiusInset);
+                cv::Point startPt(
+                    roi_.center.x + cvRound(arcR * std::cos(scale_.start_angle)),
+                    roi_.center.y + cvRound(arcR * std::sin(scale_.start_angle)));
+                cv::line(frame, roi_.center, startPt,
+                         cv::Scalar(0, 255, 0), 2);
+                cv::putText(frame,
+                            std::to_string(static_cast<int>(scale_.min_value)),
+                            startPt + cv::Point(10, 0),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                            cv::Scalar(0, 255, 0), 2);
+                cv::Point endPt(
+                    roi_.center.x + cvRound(arcR * std::cos(scale_.end_angle)),
+                    roi_.center.y + cvRound(arcR * std::sin(scale_.end_angle)));
+                cv::line(frame, roi_.center, endPt,
+                         cv::Scalar(0, 0, 255), 2);
+                cv::putText(frame,
+                            std::to_string(static_cast<int>(scale_.max_value)),
+                            endPt + cv::Point(10, 0),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                            cv::Scalar(0, 0, 255), 2);
+            }
         }
         if (angle_ >= 0) {
             if (hasHomography_) {
@@ -394,42 +444,128 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) const {
     if (pt_min_ == cv::Point() && pt_max_ == cv::Point()) return;
 
     int thickness = 1;
-    int arcR = cvRound(roi_.radius * kRadiusInset);
 
-    cv::circle(frame, roi_.center, kCalibCenterDotRadius,
-               cv::Scalar(255, 255, 255), -1);
+    if (hasHomography_) {
+        // Draw center dot in original frame
+        cv::circle(frame, roi_.center, kCalibCenterDotRadius,
+                   cv::Scalar(255, 255, 255), -1);
 
-    cv::Point vecMin = pt_min_ - roi_.center;
-    cv::Point vecMax = pt_max_ - roi_.center;
-    cv::Point ptMinIn = roi_.center + cv::Point(
-        cvRound(vecMin.x * kRadiusInset), cvRound(vecMin.y * kRadiusInset));
-    cv::Point ptMaxIn = roi_.center + cv::Point(
-        cvRound(vecMax.x * kRadiusInset), cvRound(vecMax.y * kRadiusInset));
+        // Map markers to rectified space to get their angles
+        std::vector<cv::Point2f> src = {
+            cv::Point2f(static_cast<float>(pt_min_.x),
+                        static_cast<float>(pt_min_.y)),
+            cv::Point2f(static_cast<float>(pt_max_.x),
+                        static_cast<float>(pt_max_.y))
+        };
+        std::vector<cv::Point2f> dst;
+        cv::perspectiveTransform(src, dst, homography_);
 
-    double a0 = std::atan2(vecMin.y, vecMin.x) * 180.0 / kPi;
-    double a1 = std::atan2(vecMax.y, vecMax.x) * 180.0 / kPi;
-    if (a0 < 0) a0 += 360;
-    if (a1 < 0) a1 += 360;
-    {
-        double cwEnd = (a1 > a0) ? a1 : a1 + 360;
-        bool cwTop = (a0 <= 270 && 270 <= cwEnd);
-        if (!cwTop) std::swap(a0, a1);
+        // Compute angles in rectified space
+        double a0 = std::atan2(dst[0].y - rectCenter_.y,
+                               dst[0].x - rectCenter_.x);
+        double a1 = std::atan2(dst[1].y - rectCenter_.y,
+                               dst[1].x - rectCenter_.x);
+
+        // Sample points along the arc in rectified space (circle),
+        // then inverse-warp them to get the correct arc on the ellipse
+        double arcR = roi_.radius * kRadiusInset;
+        double span = a1 - a0;
+        if (span < 0) span += 2.0 * kPi;
+
+        constexpr int kArcSamples = 60;
+        std::vector<cv::Point2f> arcSrc, arcDst;
+        for (int i = 0; i <= kArcSamples; i++) {
+            double t = a0 + span * i / kArcSamples;
+            arcSrc.emplace_back(
+                rectCenter_.x + arcR * static_cast<float>(std::cos(t)),
+                rectCenter_.y + arcR * static_cast<float>(std::sin(t)));
+        }
+        cv::Mat Hinv;
+        cv::invert(homography_, Hinv);
+        cv::perspectiveTransform(arcSrc, arcDst, Hinv);
+
+        for (size_t i = 0; i + 1 < arcDst.size(); i++) {
+            cv::line(frame,
+                     cv::Point(cvRound(arcDst[i].x), cvRound(arcDst[i].y)),
+                     cv::Point(cvRound(arcDst[i + 1].x), cvRound(arcDst[i + 1].y)),
+                     cv::Scalar(0, 255, 255), thickness, cv::LINE_AA);
+        }
+
+        // Draw min/max markers inset along the ellipse
+        std::vector<cv::Point2f> pts;
+        pts.emplace_back(static_cast<float>(pt_min_.x),
+                         static_cast<float>(pt_min_.y));
+        pts.emplace_back(static_cast<float>(pt_max_.x),
+                         static_cast<float>(pt_max_.y));
+        std::vector<cv::Point2f> ptsRect;
+        cv::perspectiveTransform(pts, ptsRect, homography_);
+
+        // Scale toward rectified center by kRadiusInset
+        std::vector<cv::Point2f> ptsInset;
+        for (auto& p : ptsRect) {
+            float dx = p.x - rectCenter_.x;
+            float dy = p.y - rectCenter_.y;
+            ptsInset.emplace_back(rectCenter_.x + dx * kRadiusInset,
+                                  rectCenter_.y + dy * kRadiusInset);
+        }
+        std::vector<cv::Point2f> ptsOriginal;
+        cv::perspectiveTransform(ptsInset, ptsOriginal, Hinv);
+        cv::Point ptMinIn(cvRound(ptsOriginal[0].x), cvRound(ptsOriginal[0].y));
+        cv::Point ptMaxIn(cvRound(ptsOriginal[1].x), cvRound(ptsOriginal[1].y));
+
+        // Draw min marker
+        cv::circle(frame, ptMinIn, kCalibPtRadius, cv::Scalar(0, 255, 0), -1);
+        cv::circle(frame, ptMinIn, kCalibPtOutlineRadius,
+                   cv::Scalar(0, 255, 0), thickness);
+        cv::putText(frame, "min", ptMinIn + cv::Point(12, 4),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+
+        // Draw max marker
+        cv::circle(frame, ptMaxIn, kCalibPtRadius, cv::Scalar(0, 0, 255), -1);
+        cv::circle(frame, ptMaxIn, kCalibPtOutlineRadius,
+                   cv::Scalar(0, 0, 255), thickness);
+        cv::putText(frame, "max", ptMaxIn + cv::Point(12, 4),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+
+    } else {
+        // Original circular path
+        int arcR = cvRound(roi_.radius * kRadiusInset);
+
+        cv::circle(frame, roi_.center, kCalibCenterDotRadius,
+                   cv::Scalar(255, 255, 255), -1);
+
+        cv::Point vecMin = pt_min_ - roi_.center;
+        cv::Point vecMax = pt_max_ - roi_.center;
+        cv::Point ptMinIn = roi_.center + cv::Point(
+            cvRound(vecMin.x * kRadiusInset), cvRound(vecMin.y * kRadiusInset));
+        cv::Point ptMaxIn = roi_.center + cv::Point(
+            cvRound(vecMax.x * kRadiusInset), cvRound(vecMax.y * kRadiusInset));
+
+        double a0 = std::atan2(vecMin.y, vecMin.x) * 180.0 / kPi;
+        double a1 = std::atan2(vecMax.y, vecMax.x) * 180.0 / kPi;
+        if (a0 < 0) a0 += 360;
+        if (a1 < 0) a1 += 360;
+        {
+            double cwEnd = (a1 > a0) ? a1 : a1 + 360;
+            bool cwTop = (a0 <= 270 && 270 <= cwEnd);
+            if (!cwTop) std::swap(a0, a1);
+        }
+        if (a1 <= a0) a1 += 360;
+        cv::ellipse(frame, roi_.center, cv::Size(arcR, arcR), 0, a0, a1,
+                    cv::Scalar(0, 255, 255), thickness);
+
+        cv::circle(frame, ptMinIn, kCalibPtRadius, cv::Scalar(0, 255, 0), -1);
+        cv::circle(frame, ptMinIn, kCalibPtOutlineRadius,
+                   cv::Scalar(0, 255, 0), thickness);
+        cv::putText(frame, "min", ptMinIn + cv::Point(12, 4),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+
+        cv::circle(frame, ptMaxIn, kCalibPtRadius, cv::Scalar(0, 0, 255), -1);
+        cv::circle(frame, ptMaxIn, kCalibPtOutlineRadius,
+                   cv::Scalar(0, 0, 255), thickness);
+        cv::putText(frame, "max", ptMaxIn + cv::Point(12, 4),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
     }
-    if (a1 <= a0) a1 += 360;
-    cv::ellipse(frame, roi_.center, cv::Size(arcR, arcR), 0, a0, a1,
-                cv::Scalar(0, 255, 255), thickness);
-
-    cv::circle(frame, ptMinIn, kCalibPtRadius, cv::Scalar(0, 255, 0), -1);
-    cv::circle(frame, ptMinIn, kCalibPtOutlineRadius,
-               cv::Scalar(0, 255, 0), thickness);
-    cv::putText(frame, "min", ptMinIn + cv::Point(12, 4),
-                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-
-    cv::circle(frame, ptMaxIn, kCalibPtRadius, cv::Scalar(0, 0, 255), -1);
-    cv::circle(frame, ptMaxIn, kCalibPtOutlineRadius,
-               cv::Scalar(0, 0, 255), thickness);
-    cv::putText(frame, "max", ptMaxIn + cv::Point(12, 4),
-                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
 }
 
 double CircularGauge::smoothedValue() const { return smoothed_value_; }
@@ -452,22 +588,52 @@ cv::Scalar CircularGauge::NextColor() {
 
 int CircularGauge::HandleClick(int clickX, int clickY) {
     int thresh = std::max(roi_.radius / 6, static_cast<int>(kHitTestMinThresh));
-    cv::Point center = roi_.center;
-    cv::Point vecMin = pt_min_ - center;
-    cv::Point vecMax = pt_max_ - center;
-    cv::Point ptMinIn = center + cv::Point(
-        cvRound(vecMin.x * kRadiusInset), cvRound(vecMin.y * kRadiusInset));
-    cv::Point ptMaxIn = center + cv::Point(
-        cvRound(vecMax.x * kRadiusInset), cvRound(vecMax.y * kRadiusInset));
-    int dMin = cvRound(cv::norm(cv::Point(clickX, clickY) - ptMinIn));
-    int dMax = cvRound(cv::norm(cv::Point(clickX, clickY) - ptMaxIn));
+    cv::Point click(clickX, clickY);
+
+    cv::Point ptMinTarget, ptMaxTarget;
+    if (hasHomography_) {
+        // Compute inset positions along the ellipse via rectified space
+        std::vector<cv::Point2f> pts;
+        pts.emplace_back(static_cast<float>(pt_min_.x),
+                         static_cast<float>(pt_min_.y));
+        pts.emplace_back(static_cast<float>(pt_max_.x),
+                         static_cast<float>(pt_max_.y));
+        std::vector<cv::Point2f> ptsRect;
+        cv::perspectiveTransform(pts, ptsRect, homography_);
+        std::vector<cv::Point2f> ptsInset;
+        for (auto& p : ptsRect) {
+            float dx = p.x - rectCenter_.x;
+            float dy = p.y - rectCenter_.y;
+            ptsInset.emplace_back(rectCenter_.x + dx * kRadiusInset,
+                                  rectCenter_.y + dy * kRadiusInset);
+        }
+        cv::Mat Hinv;
+        cv::invert(homography_, Hinv);
+        std::vector<cv::Point2f> ptsOriginal;
+        cv::perspectiveTransform(ptsInset, ptsOriginal, Hinv);
+        ptMinTarget = cv::Point(cvRound(ptsOriginal[0].x),
+                                cvRound(ptsOriginal[0].y));
+        ptMaxTarget = cv::Point(cvRound(ptsOriginal[1].x),
+                                cvRound(ptsOriginal[1].y));
+    } else {
+        cv::Point center = roi_.center;
+        cv::Point vecMin = pt_min_ - center;
+        cv::Point vecMax = pt_max_ - center;
+        ptMinTarget = center + cv::Point(
+            cvRound(vecMin.x * kRadiusInset), cvRound(vecMin.y * kRadiusInset));
+        ptMaxTarget = center + cv::Point(
+            cvRound(vecMax.x * kRadiusInset), cvRound(vecMax.y * kRadiusInset));
+    }
+
+    int dMin = cvRound(cv::norm(click - ptMinTarget));
+    int dMax = cvRound(cv::norm(click - ptMaxTarget));
     int hit = kMarkerNone;
     if (dMin <= thresh && dMin <= dMax)
         hit = kMarkerMin;
     else if (dMax <= thresh)
         hit = kMarkerMax;
     if (hit != kMarkerNone) {
-        MoveMarker(hit, cv::Point(clickX, clickY));
+        MoveMarker(hit, click);
     }
     return hit;
 }
@@ -484,7 +650,11 @@ void CircularGauge::DrawGaugeNumber(cv::Mat& img) const {
 
 void CircularGauge::DrawOutline(cv::Mat& img) const {
     if (roi_.radius <= 0) return;
-    cv::circle(img, roi_.center, roi_.radius, color_, kCircleThickness);
+    if (hasHomography_) {
+        cv::ellipse(img, ellipseRect_, color_, kCircleThickness, cv::LINE_AA);
+    } else {
+        cv::circle(img, roi_.center, roi_.radius, color_, kCircleThickness);
+    }
     DrawGaugeNumber(img);
 }
 
@@ -503,16 +673,46 @@ CircularGauge::CircularGauge(const cv::Point& center, int radius,
 }
 
 void CircularGauge::MoveMarker(int which, cv::Point click) {
-    cv::Point vec = click - roi_.center;
-    double dist = cv::norm(vec);
-    if (dist < 1.0) return;
-    double scale = static_cast<double>(roi_.radius) / dist;
-    cv::Point onCircle = roi_.center + cv::Point(cvRound(vec.x * scale),
-                                             cvRound(vec.y * scale));
+    cv::Point onPerimeter;
+
+    if (hasHomography_) {
+        // Map click to rectified space, project onto circle, map back
+        std::vector<cv::Point2f> src = {
+            cv::Point2f(static_cast<float>(click.x),
+                        static_cast<float>(click.y))
+        };
+        std::vector<cv::Point2f> rectPt;
+        cv::perspectiveTransform(src, rectPt, homography_);
+
+        float dx = rectPt[0].x - rectCenter_.x;
+        float dy = rectPt[0].y - rectCenter_.y;
+        float dist = std::sqrt(dx * dx + dy * dy);
+        if (dist < 1.0f) return;
+
+        float R = static_cast<float>(roi_.radius);
+        float scale = R / dist;
+        cv::Point2f markerRect(rectCenter_.x + dx * scale,
+                               rectCenter_.y + dy * scale);
+
+        cv::Mat Hinv;
+        cv::invert(homography_, Hinv);
+        std::vector<cv::Point2f> src2 = {markerRect};
+        std::vector<cv::Point2f> dst2;
+        cv::perspectiveTransform(src2, dst2, Hinv);
+        onPerimeter = cv::Point(cvRound(dst2[0].x), cvRound(dst2[0].y));
+    } else {
+        cv::Point vec = click - roi_.center;
+        double dist = cv::norm(vec);
+        if (dist < 1.0) return;
+        double scale = static_cast<double>(roi_.radius) / dist;
+        onPerimeter = roi_.center + cv::Point(cvRound(vec.x * scale),
+                                              cvRound(vec.y * scale));
+    }
+
     if (which == kMarkerMin)
-        pt_min_ = onCircle;
+        pt_min_ = onPerimeter;
     else if (which == kMarkerMax)
-        pt_max_ = onCircle;
+        pt_max_ = onPerimeter;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -520,38 +720,28 @@ void CircularGauge::MoveMarker(int which, cv::Point click) {
 // ═══════════════════════════════════════════════════════════════════
 
 bool CircularGauge::ComputeHomography(cv::Point center, cv::Point p1,
-                                      cv::Point p2, cv::Mat& H,
-                                      cv::Size& outSize,
+                                      cv::Point p2, cv::Point p3,
+                                      cv::Mat& H, cv::Size& outSize,
                                       cv::RotatedRect& ellipseRect) {
-    // Vectors from center to edge points
-    double u1 = p1.x - center.x;
-    double v1 = p1.y - center.y;
-    double u2 = p2.x - center.x;
-    double v2 = p2.y - center.y;
-
-    double d1 = u1 * u1 + v1 * v1;
-    double d2 = u2 * u2 + v2 * v2;
-    if (d1 < 1.0 || d2 < 1.0) return false;
+    // Vectors from center to the three edge points
+    double u1 = p1.x - center.x, v1 = p1.y - center.y;
+    double u2 = p2.x - center.x, v2 = p2.y - center.y;
+    double u3 = p3.x - center.x, v3 = p3.y - center.y;
 
     // Fit ellipse: A·u² + B·u·v + C·v² = 1  (centered at origin)
-    // Two equations, three unknowns → regularize by minimizing ‖[A,B,C]‖²
-    // Lagrange multiplier solution:
-    double u1sq = u1 * u1, v1sq = v1 * v1, u1v1 = u1 * v1;
-    double u2sq = u2 * u2, v2sq = v2 * v2, u2v2 = u2 * v2;
+    // Three points → 3×3 linear system, exact solve (no regularization needed)
+    cv::Mat coeffs = (cv::Mat_<double>(3, 3) <<
+        u1*u1, u1*v1, v1*v1,
+        u2*u2, u2*v2, v2*v2,
+        u3*u3, u3*v3, v3*v3);
+    cv::Mat rhs = (cv::Mat_<double>(3, 1) << 1.0, 1.0, 1.0);
 
-    double a11 = (d1 * d1) * 0.5;
-    double a12 = (u1sq * u2sq + u1v1 * u2v2 + v1sq * v2sq) * 0.5;
-    double a22 = (d2 * d2) * 0.5;
+    cv::Mat abc;
+    if (!cv::solve(coeffs, rhs, abc, cv::DECOMP_LU)) return false;
 
-    double det = a11 * a22 - a12 * a12;
-    if (std::abs(det) < 1e-12) return false;
-
-    double lam1 = (a22 - a12) / det;
-    double lam2 = (a11 - a12) / det;
-
-    double A = (lam1 * u1sq + lam2 * u2sq) * 0.5;
-    double B = (lam1 * u1v1 + lam2 * u2v2) * 0.5;
-    double C = (lam1 * v1sq + lam2 * v2sq) * 0.5;
+    double A = abc.at<double>(0);
+    double B = abc.at<double>(1);
+    double C = abc.at<double>(2);
 
     // Conic matrix  M = [[A, B/2],[B/2, C]]  must be positive-definite
     double detM = A * C - (B * 0.5) * (B * 0.5);
@@ -560,11 +750,11 @@ bool CircularGauge::ComputeHomography(cv::Point center, cv::Point p1,
     // Eigendecomposition of M (symmetric 2×2)
     double trace = A + C;
     double disc = std::sqrt(std::max(0.0, trace * trace * 0.25 - detM));
-    double lamBig = trace * 0.5 + disc;   // larger eigenvalue
-    double lamSmall = trace * 0.5 - disc; // smaller eigenvalue
+    double lamBig = trace * 0.5 + disc;
+    double lamSmall = trace * 0.5 - disc;
     if (lamSmall < 1e-12) return false;
 
-    // Eigenvector for lamSmall (= smaller eigenvalue = semi-MAJOR axis)
+    // Eigenvector for lamSmall (= semi-MAJOR axis direction)
     double ex, ey;
     if (std::abs(B * 0.5) > 1e-12 * std::max(std::abs(A - lamSmall), 1.0)) {
         ex = -(B * 0.5);
@@ -578,25 +768,22 @@ bool CircularGauge::ComputeHomography(cv::Point center, cv::Point p1,
     ex /= len;
     ey /= len;
 
-    // Q = [v_big, v_small] where v_big = (-ey, ex), v_small = (ex, ey)
-    // H_sub = Q · diag(√lamBig, √lamSmall) · Qᵀ
+    // v_big = (-ey, ex),  v_small = (ex, ey)
+    // H_sub = √lamBig · v_big·v_bigᵀ + √lamSmall · v_small·v_smallᵀ
     double s1 = std::sqrt(lamBig);
     double s2 = std::sqrt(lamSmall);
 
-    // v_big = (-ey, ex),  v_small = (ex, ey)
-    // H_sub = s1 * v_big * v_bigᵀ + s2 * v_small * v_smallᵀ
     double h00 = s1 * ey * ey + s2 * ex * ex;
     double h01 = (s2 - s1) * ex * ey;
     double h10 = h01;
     double h11 = s1 * ex * ex + s2 * ey * ey;
 
-    // Output circle radius: average of distances to the two edge points
-    double R = (std::sqrt(d1) + std::sqrt(d2)) * 0.5;
+    // Output circle radius: average of distances to the three edge points
+    double R = (std::sqrt(u1*u1 + v1*v1) +
+                std::sqrt(u2*u2 + v2*v2) +
+                std::sqrt(u3*u3 + v3*v3)) / 3.0;
 
-    // Full homography:
-    //   H = [ R·h00,  R·h01, -R·(h00·cx + h01·cy) ]
-    //       [ R·h10,  R·h11, -R·(h10·cx + h11·cy) ]
-    //       [ 0,      0,      1                     ]
+    // Full homography with translation to center at (R, R)
     H = cv::Mat::eye(3, 3, CV_64F);
     H.at<double>(0, 0) = R * h00;
     H.at<double>(0, 1) = R * h01;
@@ -625,15 +812,45 @@ bool CircularGauge::ComputeHomography(cv::Point center, cv::Point p1,
 }
 
 void CircularGauge::SetHomography(const cv::Mat& H, const cv::Size& outSize,
-                                   cv::Point center) {
+                                   cv::Point center,
+                                   cv::RotatedRect ellipseRect) {
     homography_ = H.clone();
     warpSize_ = outSize;
     rectCenter_ = cv::Point2f(outSize.width * 0.5f, outSize.height * 0.5f);
+    ellipseRect_ = ellipseRect;
     hasHomography_ = true;
 
-    // Update ROI to reflect the rectified circle
     roi_.center = center;
     roi_.radius = cvRound(std::min(outSize.width, outSize.height) * 0.5);
+
+    // Remap initial pt_min_/pt_max_ from the circle onto the ellipse:
+    // map them to rectified space (they'll land on the circle), then
+    // map them back — since MoveMarker constrains to the ellipse, we
+    // just do the same projection MoveMarker does.
+    auto remapToEllipse = [&](cv::Point& pt) {
+        std::vector<cv::Point2f> src = {
+            cv::Point2f(static_cast<float>(pt.x), static_cast<float>(pt.y))
+        };
+        std::vector<cv::Point2f> rectPt;
+        cv::perspectiveTransform(src, rectPt, homography_);
+        float dx = rectPt[0].x - rectCenter_.x;
+        float dy = rectPt[0].y - rectCenter_.y;
+        float dist = std::sqrt(dx * dx + dy * dy);
+        if (dist < 1.0f) return;
+        float R = static_cast<float>(roi_.radius);
+        float scale = R / dist;
+        cv::Point2f markerRect(rectCenter_.x + dx * scale,
+                               rectCenter_.y + dy * scale);
+        cv::Mat Hinv;
+        cv::invert(homography_, Hinv);
+        std::vector<cv::Point2f> src2 = {markerRect};
+        std::vector<cv::Point2f> dst2;
+        cv::perspectiveTransform(src2, dst2, Hinv);
+        pt = cv::Point(cvRound(dst2[0].x), cvRound(dst2[0].y));
+    };
+
+    remapToEllipse(pt_min_);
+    remapToEllipse(pt_max_);
 }
 
 cv::Mat CircularGauge::WarpFrame(const cv::Mat& frame) const {
