@@ -186,6 +186,7 @@ private:
 
     // Ellipse-to-circle homography state
     cv::Mat homography_;                      // 3×3 warp matrix (empty if unused)
+    cv::Mat homographyBase_;                  // Original H (before motion shifts)
     cv::Size warpSize_;                       // Output size of warped image
     cv::Point2f rectCenter_;                  // Center of gauge in rectified image
     cv::RotatedRect ellipseRect_;             // Fitted ellipse for drawing

@@ -944,6 +944,7 @@ void CircularGauge::SetHomography(const cv::Mat& H, const cv::Size& outSize,
                                    cv::Point center,
                                    cv::RotatedRect ellipseRect) {
     homography_ = H.clone();
+    homographyBase_ = H.clone();
     warpSize_ = outSize;
     rectCenter_ = cv::Point2f(outSize.width * 0.5f, outSize.height * 0.5f);
     ellipseRect_ = ellipseRect;
@@ -1123,6 +1124,16 @@ void CircularGauge::UpdateROI(const cv::Mat& frame) {
                 double scaleX = std::sqrt(H.at<double>(0, 0) * H.at<double>(0, 0) +
                                           H.at<double>(0, 1) * H.at<double>(0, 1));
                 roi_.radius = cvRound(roi_ref_.radius * scaleX);
+
+                // Shift the homography to follow the moved ellipse
+                if (hasHomography_ && !homographyBase_.empty()) {
+                    double dx = newCenter.x - roi_ref_.center.x;
+                    double dy = newCenter.y - roi_ref_.center.y;
+                    cv::Mat T = cv::Mat::eye(3, 3, CV_64F);
+                    T.at<double>(0, 2) = -dx;
+                    T.at<double>(1, 2) = -dy;
+                    homography_ = homographyBase_ * T;
+                }
             }
         }
     }

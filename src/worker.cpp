@@ -378,16 +378,14 @@ void Worker::processNextFrame() {
         // (skip for gauges that use homography-based rectification)
         if (!motionInitialized_) {
             for (auto& d : circularGauges_) {
-                if (!d.hasHomography())
-                    d.InitMotionFeatures(frame);
+                d.InitMotionFeatures(frame);
             }
             motionInitialized_ = true;
         }
 
         int labelY = 60;
         for (auto& d : circularGauges_) {
-            if (!d.hasHomography())
-                d.UpdateROI(frame);
+            d.UpdateROI(frame);
             d.DetectNeedle(frame);
             d.DrawOverlay(frame, labelY);
             labelY += 30;
