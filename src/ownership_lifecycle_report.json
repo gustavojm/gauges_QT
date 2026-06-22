@@ -1,0 +1,62 @@
+[
+  {
+    "file": "worker.cpp",
+    "line": 391,
+    "category": "Ownership & Lifecycle",
+    "confidence": 75,
+    "title": "emit finished() before QThread::currentThread()->quit() — fragile ordering",
+    "finding": "Worker::quit() emits finished() at line 391 and then calls QThread::currentThread()->quit() at line 392. Because finished() is emitted before the event loop stops, any direct-connected slot to Worker::finished would execute while the worker thread is still alive but after OpenCV resources (cap_, writer_) have been released. Currently all connections to finished() are queued (main_window.cpp:159 -> QApplication::quit), but the ordering is fragile: a future maintainer adding a direct connection could trigger use-after-free or operations on a half-destroyed Worker.",
+    "trace": "worker.cpp:387-392 sequence: timer stop, quit_=true, cap_.release(), writer_.release(), emit finished(), QThread::currentThread()->quit(). Verified all finished() connections across main_window.cpp:159-160 and all page connectToWorker() methods — all are cross-thread queued connections. Still, the signal fires before the event-loop quit, meaning slots could in theory queue new work on the worker thread after resources are freed.",
+    "mitigation": "Swap the order: call QThread::currentThread()->quit() first, then emit finished(). This ensures the event loop stops before any signal handler can react, making finished() the last thing that happens on the worker thread."
+  },
+  {
+    "file": "main_window.cpp",
+    "line": 185,
+    "category": "Ownership & Lifecycle",
+    "confidence": 65,
+    "title": "workerThread_->wait(3000) timeout leaves worker_ in undefined state",
+    "finding": "MainWindow::~MainWindow() waits at most 3 seconds for the worker thread to finish. If the thread does not stop in time, the code falls through with a warning. worker_ (no parent, so not cleaned by Qt parent-child) may still be alive. When MainWindow is fully destroyed, Qt destroys its children including workerThread_. QThread's destructor may call terminate() on the still-running OS thread (if it has not exited), potentially killing the thread mid-execution while Worker::quit() is releasing OpenCV resources, causing undefined behavior in cv::VideoCapture::release() or cv::VideoWriter::release().",
+    "trace": "main_window.cpp:182-193: emit quitRequested, wait(3000), warning fallthrough. worker_ is a raw Worker* with nullptr parent (worker.cpp:41-44). workerThread_ is a child of MainWindow and destroyed by Qt after ~MainWindow body. If thread is still running, QThread dtor behavior is implementation-defined — may terminate().",
+    "mitigation": "After timeout, use QThread::requestInterruption() and wait in a loop with shorter intervals (e.g., 5 × 200ms). As a last resort, a second emit quitRequested + wait(1000) loop can help. Document that process exit is expected as the final cleanup."
+  },
+  {
+    "file": "main_window.h",
+    "line": 69,
+    "category": "Ownership & Lifecycle",
+    "confidence": 55,
+    "title": "raw Worker* pointer becomes dangling after deleteLater deletes Worker",
+    "finding": "Worker* worker_ is a raw pointer member of MainWindow (main_window.h:69). After the QThread::finished → deleteLater chain fires, the Worker object is destroyed but worker_ is never reset. Although MainWindow::~MainWindow() does not currently dereference worker_ (it only uses workerThread_), any future code path accessing worker_ after thread shutdown would read a dangling pointer. This is a latent use-after-free risk that grows with code evolution.",
+    "trace": "main_window.h:69 Worker* worker_ = nullptr; initialized and set at main_window.cpp:139. worker_ is deleted via deleteLater from QThread::finished (main_window.cpp:144-145). No nullptr reset after deletion anywhere in the codebase. MainWindow::~MainWindow() at lines 182-193 accesses workerThread_ but not worker_.",
+    "mitigation": "Replace with QPointer<Worker> worker_ (which auto-nulls on QObject destruction). Then all accessors can safely check if (worker_). Alternatively, connect to Worker::destroyed to null the raw pointer."
+  },
+  {
+    "file": "worker.cpp",
+    "line": 320,
+    "category": "Ownership & Lifecycle",
+    "confidence": 60,
+    "title": "processNextFrame emits finished() at end-of-video but does not quit the event loop or set quit_",
+    "finding": "When the video reaches the end, processNextFrame() emits finished() at line 320 and returns. It does NOT call QThread::currentThread()->quit() and does NOT set quit_ = true. The worker thread event loop continues running. If the user then clicks Restart, restart() seeks to frame 0 and restarts the chainTimer_ as if nothing happened. However, on the main thread, the earlier emit finished() has already queued QApplication::quit() (line 159-160). This means clicking Restart after the video ends restarts processing but the application is simultaneously shutting down. The Worker may be processing frames while the MainWindow is being destroyed, causing signal delivery to a destroyed MainWindow object (via worker → frameReady → videoWidget_, modeChanged → setMode, etc.) — which is undefined behavior.",
+    "trace": "worker.cpp:313-321: processNextFrame emits finished() at line 320, returns without quitting thread or setting quit_. main_window.cpp:159-160 connects Worker::finished to QApplication::quit() (queued). main_window.cpp:182-193 destructor emits quitRequested and waits. If user hits Restart (connected restartClicked → Worker::restart at processing_page.cpp:74-75) after finished() but before the MainWindow is destroyed, processing resumes on a Worker whose main-thread targets are being torn down.",
+    "mitigation": "In processNextFrame(), after emitting finished(), set quit_ = true and call QThread::currentThread()->quit(). This ensures the worker thread stops after natural end-of-video. If the user wants to restart, they need a different path (e.g., a new Worker). Alternatively, add an explicit 'mode' transition check before emitting finished() so it only fires once, and disconnect QApplication::quit from finished; instead let the MainWindow decide when to exit."
+  },
+  {
+    "file": "main_window.cpp",
+    "line": 144,
+    "category": "Ownership & Lifecycle",
+    "confidence": 50,
+    "title": "QThread::finished → deleteLater uses AutoConnection which resolves to Direct (not Queued)",
+    "finding": "The connection connect(workerThread_, &QThread::finished, worker_, &QObject::deleteLater) uses Qt::AutoConnection. workerThread_ lives on the main thread, but QThread::finished is emitted from the worker thread by QThreadPrivate::finish(). Since worker_ also lives on the worker thread (after moveToThread), AutoConnection resolves to Direct — meaning deleteLater() is called synchronously on the worker thread after the event loop has exited. deleteLater() posts a QDeferredDeleteEvent to the (dead) worker thread event loop. While Qt's thread cleanup processes pending DeferredDelete events in most cases, this relies on undocumented implementation details. If cleanup is interrupted (e.g., QThread termination), worker_ leaks. The worker_ is also destroyed from the wrong thread (worker thread) rather than the main thread where it was created, which is atypical and could interact poorly with thread-local or thread-affine resources.",
+    "trace": "main_window.cpp:140: worker_->moveToThread(workerThread_). main_window.cpp:144-145: connect. QThread emits finished() from the worker thread (QThreadPrivate::finish()). Since both signal emission context (worker thread) and receiver (worker_ lives on worker thread) match -> AutoConnection -> DirectConnection. Verified against Qt 6 source: QMetaObject::activate compares receiverThreadData vs currentThreadData.",
+    "mitigation": "Explicitly use Qt::QueuedConnection: connect(workerThread_, &QThread::finished, worker_, &QObject::deleteLater, Qt::QueuedConnection). This ensures the DeferredDelete event is posted to the main thread's event loop, where it will be processed normally, and Worker is destroyed on its original thread."
+  },
+  {
+    "file": "gauge_section_helper.h",
+    "line": 76,
+    "category": "Ownership & Lifecycle",
+    "confidence": 45,
+    "title": "lambda captures &sections by reference in QDoubleSpinBox signal connections",
+    "finding": "The connect() calls at gauge_section_helper.h:76-87 capture sections by reference in lambdas connected to QDoubleSpinBox::valueChanged. While sections is a member of the page and outlives the spin boxes (which are children of the collapsible section, themselves children of the page), the capture-by-reference pattern is fragile. If rebuildGaugeSections() is called while a valueChange signal is being emitted (impossible with single-threaded Qt event processing, but easy to accidentally introduce with future thread changes), the reference would dangle during signal delivery. Additionally, if a new connection is made while iterating — not the case here, but the code invites mistakes.",
+    "trace": "gauge_section_helper.h:30-35 old sections deleted; 37-89 new sections created. 76-81 and 82-87: QObject::connect with lambda capturing [&sections, i, page]. The reference &sections points to the page's member vector. During rebuild, old QDoubleSpinBox objects are destroyed (disconnecting old lambdas), and new ones are created with fresh lambdas. Safe today, but brittle.",
+    "mitigation": "Capture by pointer to the member vector (sections = &page->sections_ or similar) or store the index and access through a static helper. Better: use QObject context-based connection with the third parameter as context so the connection auto-disconnects when the page is destroyed."
+  }
+]

@@ -107,4 +107,7 @@ private:
 
     // Safe: only set via the queued quit() slot from the main thread.
     bool quit_ = false;
+
+    // Motion compensation: initialized on first processing frame
+    bool motionInitialized_ = false;
 };

@@ -285,6 +285,7 @@ void Worker::enterProcessing() {
         std::cerr << "Warning: Could not reset to frame 0 in enterProcessing()\n";
 
     frameCount_ = 0;
+    motionInitialized_ = false;
 
     mode_ = AppMode::kProcessing;
     emit modeChanged(AppMode::kProcessing);
@@ -306,8 +307,17 @@ void Worker::processNextFrame() {
     }
 
     if (!frame.empty()) {
+        // Initialize motion features on the first processing frame
+        if (!motionInitialized_) {
+            for (auto& d : circularGauges_) {
+                d.InitMotionFeatures(frame);
+            }
+            motionInitialized_ = true;
+        }
+
         int labelY = 60;
         for (auto& d : circularGauges_) {
+            d.UpdateROI(frame);
             d.DetectNeedle(frame);
             d.DrawOverlay(frame, labelY);
             labelY += 30;
@@ -331,6 +341,7 @@ void Worker::restart() {
         std::cerr << "Warning: Could not reset to frame 0 in restart()\n";
     for (auto& d : circularGauges_) d.ResetSmoothing();
     frameCount_ = 0;
+    motionInitialized_ = false;
     chainTimer_.start(0, this);
 }
 

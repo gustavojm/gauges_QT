@@ -448,3 +448,145 @@ void CircularGauge::MoveMarker(int which, cv::Point click) {
     else if (which == kMarkerMax)
         pt_max_ = onCircle;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  Motion Compensation
+// ═══════════════════════════════════════════════════════════════════
+
+void CircularGauge::InitMotionFeatures(const cv::Mat& frame) {
+    roi_ref_ = roi_;
+
+    cv::cvtColor(frame, ref_gray_, cv::COLOR_BGR2GRAY);
+
+    // Create circular mask for feature detection inside the gauge face
+    cv::Mat mask = cv::Mat::zeros(ref_gray_.size(), CV_8UC1);
+    // Use a slightly smaller circle to avoid edge artifacts
+    int maskRadius = cvRound(roi_.radius * 0.85);
+    cv::circle(mask, roi_.center, maskRadius, cv::Scalar(255), -1);
+
+    cv::goodFeaturesToTrack(ref_gray_, ref_features_, kMaxFeatures,
+                            kFeatureQuality, kFeatureBlockSize, mask,
+                            kMinFeatureDist);
+
+    prev_gray_ = ref_gray_.clone();
+    prev_features_ = ref_features_;
+}
+
+void CircularGauge::UpdateROI(const cv::Mat& frame) {
+    if (ref_features_.empty()) return;
+
+    cv::Mat gray;
+    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+
+    if (prev_gray_.empty()) {
+        prev_gray_ = gray.clone();
+        return;
+    }
+
+    // Track features from previous frame to current frame
+    std::vector<cv::Point2f> currentPts;
+    std::vector<uchar> status;
+    std::vector<float> err;
+
+    cv::calcOpticalFlowPyrLK(prev_gray_, gray, prev_features_, currentPts,
+                              status, err);
+
+    // Filter: keep only successfully tracked points
+    std::vector<cv::Point2f> trackedPrev, trackedCurr;
+    for (size_t i = 0; i < status.size(); i++) {
+        if (status[i]) {
+            trackedPrev.push_back(prev_features_[i]);
+            trackedCurr.push_back(currentPts[i]);
+        }
+    }
+
+    // Need enough points to estimate a reliable transform
+    if (trackedCurr.size() < kMinPointsForTransform) {
+        prev_gray_ = gray.clone();
+        return;
+    }
+
+    // Compute affine transform (rotation + uniform scale + translation)
+    // from reference features to current features.
+    // First, map reference features to current frame's tracked positions.
+    // We need: ref -> current mapping, so we need to find the transform
+    // that maps ref_features_ positions to the tracked positions.
+    //
+    // Since we track prev->current, and prev was the last known position,
+    // we accumulate: compose the new delta with the existing transform.
+
+    // Compute rigid transform from reference to current tracked points.
+    // We have trackedPrev (positions in prev frame) and trackedCurr (positions in current frame).
+    // We also know the mapping from ref to trackedPrev (accumulated from previous steps).
+    // For simplicity, we re-derive the transform from reference to current each frame
+    // by chaining: ref -> prev -> current.
+
+    // Compute transform from ref to prev (using ref_features_ mapped to trackedPrev)
+    // Actually, we need to track from ref directly. Let's re-approach:
+    // We track prev->current each frame. To get ref->current, we need the
+    // accumulated displacement. A cleaner approach: track from ref directly.
+
+    // Alternative simpler approach: use optical flow from reference to current.
+    // Re-detect or re-track from reference each time is expensive.
+    // Instead, accumulate the translation/transform.
+
+    // Best approach: compute transform from ref_features_ to current positions
+    // by propagating through the chain. We keep prev_features_ as the positions
+    // of the reference features in the previous frame. So prev_features_ IS
+    // the current known positions of ref_features_. We track prev->current,
+    // so currentPts gives us the new positions of ref_features_.
+
+    // Compute affine transform from ref_features_ (reference positions)
+    // to the newly tracked positions (currentPts filtered by status).
+    if (trackedCurr.size() >= kMinPointsForTransform) {
+        // We need ref features that correspond to tracked points.
+        // Since we filter by status, trackedPrev[i] = prev_features_[j]
+        // where j is the index that succeeded. But prev_features_ contains
+        // ALL reference feature positions (accumulated). So trackedPrev
+        // already contains the reference-mapped positions from the previous step.
+
+        // Actually, let me restructure: prev_features_ always holds the
+        // positions of ref_features_ in the previous frame. After tracking,
+        // currentPts holds positions in current frame. So:
+        // ref_features_[i] -> prev_features_[i] (known from last frame)
+        // prev_features_[i] -> currentPts[i] (just computed)
+        // We want: ref_features_[i] -> currentPts[i]
+
+        // For a rigid/affine transform, we can directly compute ref->current.
+        // We need the subset of ref_features_ that were successfully tracked.
+        std::vector<cv::Point2f> refSub, currSub;
+        for (size_t i = 0; i < status.size(); i++) {
+            if (status[i]) {
+                refSub.push_back(ref_features_[i]);
+                currSub.push_back(currentPts[i]);
+            }
+        }
+
+        if (refSub.size() >= kMinPointsForTransform) {
+            cv::Mat inliers;
+            cv::Mat H = cv::estimateAffinePartial2D(refSub, currSub, inliers,
+                                                    cv::RANSAC,
+                                                    kInlierReprojThresh);
+            if (!H.empty()) {
+                // Apply transform to reference center
+                cv::Point2f refCenter(static_cast<float>(roi_ref_.center.x),
+                                      static_cast<float>(roi_ref_.center.y));
+                std::vector<cv::Point2f> transformed;
+                cv::transform(std::vector<cv::Point2f>{refCenter}, transformed, H);
+                cv::Point2f newCenter = transformed[0];
+
+                roi_.center = cv::Point(cvRound(newCenter.x),
+                                        cvRound(newCenter.y));
+
+                // Estimate scale from the transform matrix
+                double scaleX = std::sqrt(H.at<double>(0, 0) * H.at<double>(0, 0) +
+                                          H.at<double>(0, 1) * H.at<double>(0, 1));
+                roi_.radius = cvRound(roi_ref_.radius * scaleX);
+            }
+        }
+    }
+
+    // Update tracking state for next frame
+    prev_gray_ = gray.clone();
+    prev_features_ = currentPts;
+}

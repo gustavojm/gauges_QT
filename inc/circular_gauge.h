@@ -41,6 +41,14 @@ inline constexpr int kAdaptiveThreshC = 8;
 inline constexpr double kNeedleDensityWeight = 0.4;
 inline constexpr double kNeedleReachWeight = 0.6;
 
+// Motion compensation (optical flow)
+inline constexpr int kMaxFeatures = 100;
+inline constexpr double kFeatureQuality = 0.01;
+inline constexpr int kFeatureBlockSize = 7;
+inline constexpr double kMinFeatureDist = 5.0;
+inline constexpr size_t kMinPointsForTransform = 6;
+inline constexpr double kInlierReprojThresh = 3.0;
+
 // Overlay drawing
 inline constexpr int kCircleThickness = 2;
 inline constexpr int kNeedleThickness = 3;
@@ -72,6 +80,10 @@ public:
 
     // ─── Needle Detection ───────────────────────────────────────────
     double DetectNeedle(const cv::Mat& frame);
+
+    // ─── Motion Compensation ────────────────────────────────────────
+    void InitMotionFeatures(const cv::Mat& frame);
+    void UpdateROI(const cv::Mat& frame);
 
     // ─── Calibration ────────────────────────────────────────────────
     void FinalizeCalibration();
@@ -120,6 +132,7 @@ private:
     };
 
     ROI roi_ = {};
+    ROI roi_ref_ = {};              // Original ROI from detection
     ScaleCalibration scale_;
 
     // Color
@@ -140,6 +153,12 @@ private:
     double smoothed_value_ = 0;
     int number_ = 0;
     static int next_number_;
+
+    // Motion compensation state
+    cv::Mat ref_gray_;                        // Grayscale reference frame
+    std::vector<cv::Point2f> ref_features_;   // Feature points on reference frame
+    cv::Mat prev_gray_;                       // Previous frame grayscale
+    std::vector<cv::Point2f> prev_features_;  // Tracked points from previous frame
 };
 
 // ─── Shared Types ─────────────────────────────────────────────────

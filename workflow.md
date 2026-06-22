@@ -10,26 +10,30 @@ flowchart TB
         Loop["Qt Event Loop
         (QApplication::exec())"]
         Input["User input:
-        • VideoWidget mouse click → signal
-        • Slider valueChanged → signal
+        • VideoWidget mouse click → imageClicked signal
+        • VideoWidget mouse drag → mouseMoved signal
+        • VideoWidget release → imageMouseReleased signal
+        • Slider/checkbox/spinbox → valueChanged signal
         • Button clicked → signal"]
         UI["Render:
-        • QLabel pixmap update from frameReady signal
-        • Overlays painted on VideoWidget
-        • Mode-specific page in QStackedWidget"]
-        SignalFwd["Signal → Worker slot
-        (Qt::QueuedConnection)"]
+        • VideoWidget::setImage → QPainter draws QPixmap
+        • mode-specific page shown/hidden via setVisible()
+        • Collapsible sections in CalibrationPage / ProcessingPage"]
         ProcessSig["Process Worker signals:
-        • frameReady → update QLabel
-        • gaugeValuesUpdated → update table
-        • calibUIUpdated → update spinner ranges
-        • modeChanged → switch QStackedWidget page"]
+        • frameReady → videoWidget_->setImage
+        • modeChanged → setMode() → show/hide pages
+        • calibrationDataReady → rebuild collapsible sections
+        • liveValuesUpdated → update section titles
+        • frameCountUpdated → update frame counter label
+        • detectionCountChanged → update gauge count label
+        • manualPlacementActivated → hide sliders, show instructions
+        • manualInstructionChanged → update manual click step
+        • finished → QApplication::quit()"]
 
         Init --> Loop
-        Loop --> Input --> SignalFwd
+        Loop --> Input -->|"queued invokeMethod"| Worker_Thread
         Loop --> UI
         Loop --> ProcessSig
-        SignalFwd --> Loop
         UI --> Loop
         ProcessSig --> Loop
     end
@@ -44,82 +48,140 @@ flowchart TB
         Start["Slot: start()
         • Open VideoCapture
         • Read first frame
-        • FindGauges (HoughCircles)"]
-        HandleClick["Slot: handleClick(x, y)
-        • Manual circle placement
-        • Calibration min/max click"]
+        • FindGauges (HoughCircles)
+        • emit frameReady, detectionCountChanged, modeChanged"]
 
-        CalibSlots["Slots: confirmGauges / addManual
-        / addAnotherGauge / confirmCalib
-        / setCalibMin / setCalibMax / startCalibration
-        → Modify calibration state machine"]
+        DetClick["Slot: onImageClicked(x, y)
+        → handleDetectionClick():
+        • Two-click manual gauge placement
+          (center then edge)"]
 
-        ProcessNext["Slot: processNextFrame()
-        (triggered by QTimer::singleShot(0))
-        • cap.read(next frame)
-        • DetectNeedle per gauge
-        • DrawOverlay per gauge
-        • writer.write(frame)
-        • emit frameReady, gaugeValuesUpdated
-        • schedule next: QTimer::singleShot(0, …, processNextFrame)"]
+        CalibClick["Slot: onImageClicked(x, y)
+        → handleCalibrationClick():
+        • Hit-test min/max markers
+        • Start drag on hit marker"]
 
-        Other["Slots: setCanny / setAcc / setManualPlacement
-        → Update detection parameters
-        → Re-run FindGauges"]
+        Drag["Slots: onDragMove(x,y) / onDragRelease()
+        → MoveMarker projects onto circle perimeter
+        → publishCalibrationDisplay()"]
+
+        UpdateCanny["Slot: setCanny(int)
+        → reRunDetection()
+        → emit frameReady, detectionCountChanged"]
+
+        UpdateAcc["Slot: setAcc(int)
+        → reRunDetection()
+        → emit frameReady, detectionCountChanged"]
+
+        ManualToggle["Slot: setManualPlacement(bool)
+        → det_.manualPlacement = checked
+        → emit manualPlacementActivated, manualInstructionChanged"]
+
+        ConfirmGauges["Slot: confirmGauges()
+        • Create CircularGauge objects from ROIs
+        • Store calibFrame_
+        • enterCalibration()
+          → mode_ = kCalibration
+          → emit modeChanged + calibrationDataReady
+          → publishCalibrationDisplay()"]
+
+        SetRange["Slot: setGaugeCalibRange(idx, min, max)
+        → gauge.SetCalibrationValues(min, max)
+        → refreshCalibData() → emit calibrationDataReady"]
+
+        ConfirmCalib["Slot: confirmCalib()
+        → FinalizeCalibration() per gauge (atan2)
+        → enterProcessing()
+          → cap.set(CAP_PROP_POS_FRAMES, 0)
+          → emit modeChanged + calibrationDataReady
+          → frameCount_ = 0
+          → chainTimer_.start(0, this)"]
+
+        TimerEv["QBasicTimer::timerEvent()
+        → processNextFrame()
+          • cap.read(next frame)
+          • DetectNeedle per gauge (colored → radial)
+          • AngleToValue (linear interp, wrap)
+          • AddReading (5-frame smooth)
+          • DrawOverlay per gauge
+          • emit frameReady
+          • emit liveValuesUpdated
+          • emit frameCountUpdated
+          • chainTimer_.start(0, this) → re-arm"]
 
         Restart["Slot: restart()
         • cap.set(CAP_PROP_POS_FRAMES, 0)
-        • Restart detection chain"]
+        • Reset smoothing
+        • frameCount_ = 0
+        • Restart timer chain"]
+
         Quit["Slot: quit()
-        • Set quit_ flag
+        • quit_ = true
+        • chainTimer_.stop()
+        • cap_.release()
+        • emit finished()
         • QThread::currentThread()->quit()"]
 
         Emit["emit signals → Main thread:
         • frameReady(QImage)
-        • gaugeValuesUpdated(QVector<double>)
-        • calibUIUpdated(CalibUIState)
-        • modeChanged(AppMode)
+        • calibrationDataReady(QVector&lt;GaugeCalibData&gt;)
+        • liveValuesUpdated(QVector&lt;GaugeCalibData&gt;)
         • frameCountUpdated(int, int)
-        • detectionUpdated(size_t)"]
+        • detectionCountChanged(int)
+        • modeChanged(AppMode)
+        • manualPlacementActivated(bool)
+        • manualInstructionChanged(bool)
+        • finished()"]
 
         WInit --> CmdLoop
         CmdLoop --> Start --> Emit
-        CmdLoop --> HandleClick --> Emit
-        CmdLoop --> CalibSlots --> Emit
-        CmdLoop --> Other --> Emit
+        CmdLoop --> DetClick --> Emit
+        CmdLoop --> CalibClick --> Drag --> Emit
+        CmdLoop --> UpdateCanny --> Emit
+        CmdLoop --> UpdateAcc --> Emit
+        CmdLoop --> ManualToggle --> Emit
+        CmdLoop --> ConfirmGauges --> Emit
+        CmdLoop --> SetRange --> Emit
+        CmdLoop --> ConfirmCalib --> Emit
+        CmdLoop --> TimerEv -->|"chainTimer_.start(0)"| Emit
+        Emit -->|"Qt queues signal"| CmdLoop
         CmdLoop --> Restart --> Emit
         CmdLoop --> Quit
-        ProcessNext -->|"singleShot(0) chain"| Emit
-        Emit -->|"Qt queues signal"| CmdLoop
     end
 
-    SignalFwd -.->|"QMetaObject::invokeMethod\n(Qt::QueuedConnection)"| CmdLoop
-    Emit -.->|"queued signal"| ProcessSig
+    Main_Thread -.->|"QMetaObject::invokeMethod\n(Qt::QueuedConnection)"| Worker_Thread
+    Worker_Thread -.->|"queued signal"| Main_Thread
 
     subgraph Mode_Flow["MODE FLOW"]
         D["DETECTION:
-        Adjust Canny/Acc sliders
-        HoughCircles finds circles
-        (auto or manual placement)"]
+        Adjust Canny/Acc sliders → re-run HoughCircles
+        Check 'manual placement' → 2-click gauge add
+        Found N gauges displayed
+        Click 'Confirm' when ready"]
         C["CALIBRATION:
-        Click min marking
-        Click max marking
-        Set min/max values
-        (one or more gauges)"]
+        Drag green (min) / red (max) markers on each gauge
+        Adjust Min/Max spinbox values per gauge
+        Click 'Confirm' to finalize
+        Click 'Cancel' to quit"]
         P["PROCESSING:
-        QTimer::singleShot chain
-        Read & process each frame
-        Detect needle angle per gauge
-        Display gauge values"]
+        QBasicTimer-driven chain (0ms interval)
+        Reads & processes every frame sequentially
+        Needle detection (colored HSV → radial scan)
+        5-frame moving average smoothing
+        Live gauge values update per frame
+        Click 'Restart' to loop from beginning
+        Click 'Quit' to exit"]
 
-        D -->|"Confirm / Manual button"| C
-        C -->|"Next gauge (auto)"| C
-        C -->|"Last gauge done"| P
+        D -->|"confirmGauges()"| C
+        C -->|"confirmCalib()"| P
+        P -->|"restart()"| P
+        P -->|"quit()"| end
+        C -->|"cancel → quit()"| end
     end
 
-    D -.->|"emit modeChanged(DETECTION)"| UI
-    C -.->|"emit modeChanged(CALIBRATION)"| UI
-    P -.->|"emit modeChanged(PROCESSING)"| UI
+    D -.->|"modeChanged(DETECTION)"| UI
+    C -.->|"modeChanged(CALIBRATION)"| UI
+    P -.->|"modeChanged(PROCESSING)"| UI
 ```
 
 ---
@@ -127,14 +189,14 @@ flowchart TB
 ## Thread Timeline — How frames flow
 
 ```
-Worker:  [read N]→[process N]→[emit frameReady(N)]→[next singleShot(0)]→[read N+1]→...
+Worker:  [read N]→[process N]→[emit signals(N)]→[chainTimer_.start(0)]→[read N+1]→...
               ↑                          │
           frame N                    Qt queues the signal
               ↓                          ↓
-Main:        ...  [processSignal]→[render N]→[next event]→...[process N+1]→[render N+1]→...
+Main:        [processSignal]→[render N]→[next event]→...[process N+1]→[render N+1]→...
 ```
 
-Worker and Main run in **parallel**. Frames are delivered to the GUI via queued signals — the GUI always shows the latest **completed** frame and never waits for processing.
+Worker and Main run in **parallel**. The `QBasicTimer` chain (0 ms interval) yields to the worker's event loop between frames, allowing queued commands (quit, restart, setCanny, etc.) to be processed immediately. The GUI always shows the latest **completed** frame and never waits for processing.
 
 ---
 
@@ -142,14 +204,14 @@ Worker and Main run in **parallel**. Frames are delivered to the GUI via queued 
 
 | Operation | Thread | Cost |
 |---|---|---|
-| `FindGauges` (HoughCircles) | Worker | High |
-| `DetectNeedle` (HSV + contours / radial scan) | Worker | High |
-| `cap.read` (video I/O) | Worker | Medium |
-| `cv::circle`, `cv::putText` (overlays) | Worker | Low |
-| `QImage` conversion from `cv::Mat` | Worker | Low |
-| `QPixmap::fromImage` + `QLabel::setPixmap` | Main | Low |
-| `QSlider`, `QSpinBox`, button event handling | Main | Negligible |
-| `QStackedWidget::setCurrentIndex` | Main | Negligible |
+| `VideoCapture::read` (video I/O) | Worker | Medium |
+| `FindGauges` (HoughCircles, 7 param sets × 2 blur variants) | Worker | High |
+| `DetectNeedle` (HSV segmentation → radial scan fallback) | Worker | High |
+| `DrawOverlay` (circle, lines, text, needle) | Worker | Low |
+| `cv::Mat` → `QImage` conversion | Worker | Low |
+| `QPixmap::fromImage` + `QPainter` draw | Main | Low |
+| `QSlider`, `QSpinBox`, `QCheckBox`, `QPushButton` events | Main | Negligible |
+| Collapsible section rebuilding (widget creation) | Main | Low (one-time) |
 
 The **main thread never blocks** on any high/medium cost operation.
 
@@ -161,11 +223,39 @@ All thread-to-thread communication uses **queued Qt signals/slots**:
 
 | Direction | Mechanism | Example |
 |---|---|---|
-| Main → Worker | Slot invocation via `QMetaObject::invokeMethod` or signal–slot connection | `invokeMethod(worker_, "setCanny", Qt::QueuedConnection, Q_ARG(int, value))` |
-| Worker → Main | Signal emission (auto-queued cross-thread) | `emit frameReady(image)` → Main thread's `onFrameReady` slot |
+| Main → Worker | Signal–slot connection (auto-queued cross-thread) | `cannySlider → worker.setCanny` |
+| Worker → Main | Signal emission (auto-queued cross-thread) | `emit frameReady(image)` → videoWidget lambda |
 
 No mutexes, no shared memory, no polling.
 
+---
+
 ## Mode transitions
 
-Mode changes are signalled from the Worker to Main via `modeChanged(AppMode)`. The Main thread switches the `QStackedWidget` page in response, providing immediate visual feedback. The Worker processes commands asynchronously after the UI has already updated.
+Mode changes are signalled from the Worker to Main via `modeChanged(AppMode)`. The Main thread shows/hides the corresponding page widget in response, providing immediate visual feedback. The Worker processes commands asynchronously after the UI has already updated.
+
+```
+kDetection ──(confirmGauges)──► kCalibration ──(confirmCalib)──► kProcessing
+     ▲                                                              │
+     │                                                              │
+     └──────────────────(restart)───────────────────────────────────┘
+```
+
+---
+
+## Calibration details
+
+Each gauge has two markers on its circumference:
+- **Min marker** (green) — initial position at 135° (upper-left)
+- **Max marker** (red) — initial position at 45° (upper-right)
+
+User drags markers to the actual min/max scale markings on the gauge face, then sets the corresponding numeric values via `QDoubleSpinBox` widgets. `FinalizeCalibration()` computes `start_angle` / `end_angle` via `atan2`. The angle-to-value mapping uses linear interpolation with wrap-around handling.
+
+---
+
+## Shutdown sequence
+
+1. User closes window / presses ESC / clicks Quit
+2. `quitRequested()` emitted → `Worker::quit()` sets flag, stops timer, releases `VideoCapture`, calls `QThread::currentThread()->quit()`
+3. `workerThread_->wait(3000)` blocks until worker finishes
+4. `QThread::finished` → `Worker::deleteLater()`
