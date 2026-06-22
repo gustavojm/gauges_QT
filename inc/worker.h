@@ -29,19 +29,16 @@ struct DetectionState {
     int canny = 320;
     int acc = 40;
 
-    // 3-click manual placement state
-    enum class ManualStage { kCenter, kEdge1, kEdge2, kEdge3 };
-    ManualStage manualStage = ManualStage::kCenter;
-    cv::Point manualCenter;
-    cv::Point manualEdge1;
-    cv::Point manualEdge2;
-    cv::Point manualEdge3;
+    // 5-click manual placement state (perimeter points only)
+    enum class ManualStage { kEdge1, kEdge2, kEdge3, kEdge4, kEdge5 };
+    ManualStage manualStage = ManualStage::kEdge1;
+    std::vector<cv::Point> manualEdges;
 
     // Per-gauge homography data (parallels rois vector)
     struct HomographyData {
         cv::Mat H;
         cv::Size outSize;
-        cv::Point center;
+        cv::Point center;       // inferred from the conic fit
         cv::RotatedRect ellipseRect;
     };
     std::vector<HomographyData> homographies;

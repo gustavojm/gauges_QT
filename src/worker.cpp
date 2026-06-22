@@ -113,7 +113,8 @@ void Worker::reRunDetection() {
 void Worker::setManualPlacement(bool enabled) {
     det_.manualPlacement = enabled;
     if (enabled) {
-        det_.manualStage = DetectionState::ManualStage::kCenter;
+        det_.manualStage = DetectionState::ManualStage::kEdge1;
+        det_.manualEdges.clear();
         emit manualInstructionChanged(0);
     } else if (mode_ == AppMode::kDetection) {
         reRunDetection();
@@ -149,47 +150,36 @@ void Worker::onImageClicked(int x, int y) {
 void Worker::handleDetectionClick(int x, int y) {
     cv::Point click(x, y);
 
-    if (det_.manualStage == DetectionState::ManualStage::kCenter) {
-        det_.manualCenter = click;
-        det_.manualStage = DetectionState::ManualStage::kEdge1;
-        emit manualInstructionChanged(1);
+    det_.manualEdges.push_back(click);
+    int n = static_cast<int>(det_.manualEdges.size());
 
-    } else if (det_.manualStage == DetectionState::ManualStage::kEdge1) {
-        det_.manualEdge1 = click;
-        det_.manualStage = DetectionState::ManualStage::kEdge2;
-        emit manualInstructionChanged(2);
-
-    } else if (det_.manualStage == DetectionState::ManualStage::kEdge2) {
-        det_.manualEdge2 = click;
-        det_.manualStage = DetectionState::ManualStage::kEdge3;
-        emit manualInstructionChanged(3);
-
+    if (n < 5) {
+        emit manualInstructionChanged(n);
     } else {
-        det_.manualEdge3 = click;
-
-        // Compute homography from center + 3 edge points
+        // All 5 perimeter points collected — fit ellipse and compute homography
         cv::Mat H;
         cv::Size outSize;
         cv::RotatedRect ellipseRect;
-        if (CircularGauge::ComputeHomography(det_.manualCenter, det_.manualEdge1,
-                                             det_.manualEdge2, det_.manualEdge3,
-                                             H, outSize, ellipseRect)) {
+        cv::Point inferredCenter;
+        if (CircularGauge::ComputeHomography(det_.manualEdges, H, outSize,
+                                             ellipseRect, inferredCenter)) {
             int r = cvRound(std::min(outSize.width, outSize.height) * 0.5);
-            det_.rois.push_back({det_.manualCenter, r});
+            det_.rois.push_back({inferredCenter, r});
             det_.homographies.push_back(
-                {H, outSize, det_.manualCenter, ellipseRect});
+                {H, outSize, inferredCenter, ellipseRect});
 
             std::cout << "  >> Manual gauge at ("
-                      << det_.manualCenter.x << ", "
-                      << det_.manualCenter.y
+                      << inferredCenter.x << ", "
+                      << inferredCenter.y
                       << "), warped to " << outSize.width << "x"
                       << outSize.height << "\n";
         } else {
-            std::cerr << "  >> Homography computation failed — "
-                         "are the points collinear?\n";
+            std::cerr << "  >> Ellipse fit failed — points may be "
+                         "collinear or not form an ellipse.\n";
         }
 
-        det_.manualStage = DetectionState::ManualStage::kCenter;
+        det_.manualEdges.clear();
+        det_.manualStage = DetectionState::ManualStage::kEdge1;
         emit manualInstructionChanged(0);
     }
 
@@ -210,35 +200,19 @@ void Worker::handleDetectionClick(int x, int y) {
                     cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
     }
 
-    // Draw current stage markers
-    auto drawCenterAndGuide = [&](cv::Point c) {
-        cv::circle(disp, c, kManualCenterRadius,
-                   cv::Scalar(0, 255, 255), -1);
-        drawDashedCircle(disp, c, kManualGuideRadius,
-                         cv::Scalar(0, 255, 255), 1);
-    };
-
-    if (det_.manualStage == DetectionState::ManualStage::kCenter) {
-        drawCenterAndGuide(click);
-    } else {
-        // Center already placed
-        drawCenterAndGuide(det_.manualCenter);
-
-        // Draw lines and dots for placed edge points
-        auto drawEdge = [&](cv::Point e, cv::Scalar col) {
-            cv::line(disp, det_.manualCenter, e, col, 1, cv::LINE_AA);
-            cv::circle(disp, e, kManualCenterRadius, col, -1);
-        };
-
-        if (det_.manualStage == DetectionState::ManualStage::kEdge2 ||
-            det_.manualStage == DetectionState::ManualStage::kEdge3 ||
-            det_.manualStage == DetectionState::ManualStage::kCenter) {
-            drawEdge(det_.manualEdge1, cv::Scalar(0, 200, 255));
+    // Draw placed edge points and lines between them
+    for (size_t i = 0; i < det_.manualEdges.size(); i++) {
+        cv::circle(disp, det_.manualEdges[i], kManualCenterRadius,
+                   cv::Scalar(0, 200, 255), -1);
+        if (i > 0) {
+            cv::line(disp, det_.manualEdges[i - 1], det_.manualEdges[i],
+                     cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
         }
-        if (det_.manualStage == DetectionState::ManualStage::kEdge3 ||
-            det_.manualStage == DetectionState::ManualStage::kCenter) {
-            drawEdge(det_.manualEdge2, cv::Scalar(0, 200, 255));
-        }
+    }
+    // Close the polygon if 2+ points
+    if (det_.manualEdges.size() >= 2) {
+        cv::line(disp, det_.manualEdges.back(), det_.manualEdges.front(),
+                 cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
     }
 
     emit frameReady(matToQImage(disp));
@@ -322,8 +296,8 @@ void Worker::confirmGauges() {
         // Apply homography if one was computed for this gauge
         if (i < det_.homographies.size()) {
             const auto& hd = det_.homographies[i];
-            circularGauges_.back().SetHomography(hd.H, hd.outSize, hd.center,
-                                                  hd.ellipseRect);
+            circularGauges_.back().SetHomography(hd.H, hd.outSize,
+                                                  hd.center, hd.ellipseRect);
         }
 
         std::cout << "  >> Gauge " << (circularGauges_.size() - 1)

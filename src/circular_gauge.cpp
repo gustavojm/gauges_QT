@@ -719,57 +719,72 @@ void CircularGauge::MoveMarker(int which, cv::Point click) {
 //  Ellipse-to-Circle Homography
 // ═══════════════════════════════════════════════════════════════════
 
-bool CircularGauge::ComputeHomography(cv::Point center, cv::Point p1,
-                                      cv::Point p2, cv::Point p3,
+bool CircularGauge::ComputeHomography(const std::vector<cv::Point>& pts,
                                       cv::Mat& H, cv::Size& outSize,
-                                      cv::RotatedRect& ellipseRect) {
-    // Vectors from center to the three edge points
-    double u1 = p1.x - center.x, v1 = p1.y - center.y;
-    double u2 = p2.x - center.x, v2 = p2.y - center.y;
-    double u3 = p3.x - center.x, v3 = p3.y - center.y;
+                                      cv::RotatedRect& ellipseRect,
+                                      cv::Point& inferredCenter) {
+    if (pts.size() < 5) return false;
 
-    // Fit ellipse: A·u² + B·u·v + C·v² = 1  (centered at origin)
-    // Three points → 3×3 linear system, exact solve (no regularization needed)
-    cv::Mat coeffs = (cv::Mat_<double>(3, 3) <<
-        u1*u1, u1*v1, v1*v1,
-        u2*u2, u2*v2, v2*v2,
-        u3*u3, u3*v3, v3*v3);
-    cv::Mat rhs = (cv::Mat_<double>(3, 1) << 1.0, 1.0, 1.0);
+    // Use OpenCV's robust ellipse fitter (handles noisy points)
+    std::vector<cv::Point2f> ptsF;
+    ptsF.reserve(pts.size());
+    for (const auto& p : pts)
+        ptsF.emplace_back(static_cast<float>(p.x), static_cast<float>(p.y));
 
-    cv::Mat abc;
-    if (!cv::solve(coeffs, rhs, abc, cv::DECOMP_LU)) return false;
+    cv::RotatedRect rr = cv::fitEllipse(ptsF);
 
-    double A = abc.at<double>(0);
-    double B = abc.at<double>(1);
-    double C = abc.at<double>(2);
+    float a = rr.size.width * 0.5f;   // semi-major or semi-minor
+    float b = rr.size.height * 0.5f;
+    if (a < 1.0f || b < 1.0f) return false;
 
-    // Conic matrix  M = [[A, B/2],[B/2, C]]  must be positive-definite
-    double detM = A * C - (B * 0.5) * (B * 0.5);
-    if (detM < 1e-12 || A <= 0 || C <= 0) return false;
+    float cx = rr.center.x;
+    float cy = rr.center.y;
+    inferredCenter = cv::Point(cvRound(cx), cvRound(cy));
 
-    // Eigendecomposition of M (symmetric 2×2)
-    double trace = A + C;
+    // Ensure a >= b for the eigendecomposition below
+    bool swapped = false;
+    if (a < b) { std::swap(a, b); swapped = true; }
+
+    // Angle from RotatedRect (degrees → radians)
+    double theta = rr.angle * kPi / 180.0;
+    if (swapped) theta += kPi / 2.0;  // adjust if axes were swapped
+
+    // Conic matrix M from semi-axes and rotation:
+    //   cos²θ/a² + sin²θ/b²       (cosθ sinθ)(1/a² - 1/b²)
+    //   (cosθ sinθ)(1/a² - 1/b²)  sin²θ/a² + cos²θ/b²
+    double cosT = std::cos(theta), sinT = std::sin(theta);
+    double invA2 = 1.0 / (a * a);
+    double invB2 = 1.0 / (b * b);
+
+    double M00 = cosT * cosT * invA2 + sinT * sinT * invB2;
+    double M01 = cosT * sinT * (invA2 - invB2);
+    double M11 = sinT * sinT * invA2 + cosT * cosT * invB2;
+
+    // Eigendecomposition of M
+    double trace = M00 + M11;
+    double detM = M00 * M11 - M01 * M01;
     double disc = std::sqrt(std::max(0.0, trace * trace * 0.25 - detM));
     double lamBig = trace * 0.5 + disc;
     double lamSmall = trace * 0.5 - disc;
-    if (lamSmall < 1e-12) return false;
+    if (lamSmall < 1e-15) return false;
 
     // Eigenvector for lamSmall (= semi-MAJOR axis direction)
     double ex, ey;
-    if (std::abs(B * 0.5) > 1e-12 * std::max(std::abs(A - lamSmall), 1.0)) {
-        ex = -(B * 0.5);
-        ey = A - lamSmall;
+    if (std::abs(M01) > 1e-15) {
+        ex = lamSmall - M11;
+        ey = M01;
+    } else if (std::abs(M00 - lamSmall) > std::abs(M11 - lamSmall)) {
+        ex = M01;
+        ey = lamSmall - M00;
     } else {
         ex = 1.0;
         ey = 0.0;
     }
     double len = std::sqrt(ex * ex + ey * ey);
-    if (len < 1e-12) return false;
+    if (len < 1e-15) return false;
     ex /= len;
     ey /= len;
 
-    // v_big = (-ey, ex),  v_small = (ex, ey)
-    // H_sub = √lamBig · v_big·v_bigᵀ + √lamSmall · v_small·v_smallᵀ
     double s1 = std::sqrt(lamBig);
     double s2 = std::sqrt(lamSmall);
 
@@ -778,35 +793,26 @@ bool CircularGauge::ComputeHomography(cv::Point center, cv::Point p1,
     double h10 = h01;
     double h11 = s1 * ex * ex + s2 * ey * ey;
 
-    // Output circle radius: average of distances to the three edge points
-    double R = (std::sqrt(u1*u1 + v1*v1) +
-                std::sqrt(u2*u2 + v2*v2) +
-                std::sqrt(u3*u3 + v3*v3)) / 3.0;
+    // Output radius: average distance from center to points
+    double R = 0;
+    for (const auto& p : pts) {
+        double dx = p.x - cx, dy = p.y - cy;
+        R += std::sqrt(dx * dx + dy * dy);
+    }
+    R /= static_cast<double>(pts.size());
 
-    // Full homography with translation to center at (R, R)
+    // Full homography with translation to (R, R)
     H = cv::Mat::eye(3, 3, CV_64F);
     H.at<double>(0, 0) = R * h00;
     H.at<double>(0, 1) = R * h01;
-    H.at<double>(0, 2) = R * (1.0 - h00 * center.x - h01 * center.y);
+    H.at<double>(0, 2) = R * (1.0 - h00 * cx - h01 * cy);
     H.at<double>(1, 0) = R * h10;
     H.at<double>(1, 1) = R * h11;
-    H.at<double>(1, 2) = R * (1.0 - h10 * center.x - h11 * center.y);
+    H.at<double>(1, 2) = R * (1.0 - h10 * cx - h11 * cy);
 
     int side = cvRound(R * 2.0);
     outSize = cv::Size(side, side);
-
-    // Compute RotatedRect for the fitted ellipse (for display)
-    // Eigenvalues of M give 1/a² and 1/b² where a,b are semi-axes
-    double semiMajor = 1.0 / std::sqrt(lamSmall);
-    double semiMinor = 1.0 / std::sqrt(lamBig);
-    // Ensure semiMajor >= semiMinor
-    if (semiMajor < semiMinor) std::swap(semiMajor, semiMinor);
-    float angleDeg = static_cast<float>(std::atan2(ey, ex) * 180.0 / kPi);
-    ellipseRect = cv::RotatedRect(
-        cv::Point2f(static_cast<float>(center.x), static_cast<float>(center.y)),
-        cv::Size2f(static_cast<float>(semiMajor * 2.0),
-                    static_cast<float>(semiMinor * 2.0)),
-        angleDeg);
+    ellipseRect = rr;
 
     return true;
 }

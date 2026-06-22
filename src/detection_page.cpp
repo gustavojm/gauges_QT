@@ -94,19 +94,24 @@ void DetectionPage::onManualPlacementActivated(bool active) {
 void DetectionPage::onManualInstructionChanged(int stage) {
     switch (stage) {
     case 0:
-        instructionLabel_->setText("Click on the CENTER of the gauge");
+        instructionLabel_->setText(
+            "Click 5 points on the EDGE of the gauge face");
         break;
     case 1:
         instructionLabel_->setText(
-            "Now click on a point on the EDGE of the gauge face (1/3)");
+            "Edge point 1/5 placed — click point 2");
         break;
     case 2:
         instructionLabel_->setText(
-            "Now click on a second point on the EDGE of the gauge face (2/3)");
+            "Edge point 2/5 placed — click point 3");
         break;
     case 3:
         instructionLabel_->setText(
-            "Now click on a third point on the EDGE of the gauge face (3/3)");
+            "Edge point 3/5 placed — click point 4");
+        break;
+    case 4:
+        instructionLabel_->setText(
+            "Edge point 4/5 placed — click point 5");
         break;
     }
 }

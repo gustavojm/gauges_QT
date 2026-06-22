@@ -81,10 +81,12 @@ public:
     // ─── Ellipse-to-Circle Homography ───────────────────────────────
     // From center + 2 edge points, compute a homography that maps
     // the gauge ellipse to a frontal circle.
-    static bool ComputeHomography(cv::Point center, cv::Point p1, cv::Point p2,
-                                  cv::Point p3,
+    // Fit a general ellipse through 5 perimeter points, compute its center,
+    // and build a homography that maps the ellipse to a frontal circle.
+    static bool ComputeHomography(const std::vector<cv::Point>& pts,
                                   cv::Mat& H, cv::Size& outSize,
-                                  cv::RotatedRect& ellipseRect);
+                                  cv::RotatedRect& ellipseRect,
+                                  cv::Point& inferredCenter);
     void SetHomography(const cv::Mat& H, const cv::Size& outSize,
                        cv::Point center, cv::RotatedRect ellipseRect = {});
     cv::Mat WarpFrame(const cv::Mat& frame) const;
