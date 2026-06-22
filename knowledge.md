@@ -8,14 +8,14 @@ MainWindow (Qt GUI thread)
     │  │   Worker (QObject)
     │  │       │
     │  │       ├── start()               ──→ opens video, runs initial detection
-    │  │       ├── setCanny(int)         ──→ re-runs HoughCircles
-    │  │       ├── setAcc(int)           ──→ re-runs HoughCircles
+    │  │       ├── setCanny(int)         ──→ re-runs contour detection
+    │  │       ├── setAcc(int)           ──→ (unused, kept for API compat)
     │  │       ├── setManualPlacement(bool)
-    │  │       ├── handleClick(x, y)     ──→ manual circle or calibration click
-    │  │       ├── confirmGauges()       ──→ detection → calibration
+    │  │       ├── handleClick(x, y)     ──→ 5-click manual ellipse placement or calibration click
+    │  │       ├── confirmGauges()       ──→ detection → calibration (applies homography)
     │  │       ├── addManual()           ──→ detection → calibration + manual gauge
     │  │       ├── addAnotherGauge()     ──→ adds manual gauge in calibration
-    │  │       ├── startCalibration()    ──→ circle placement → calibration clicking
+    │  │       ├── startCalibration()    ──→ ellipse placement → calibration clicking
     │  │       ├── confirmCalib()        ──→ finish one gauge, advance or start processing
     │  │       ├── setCalibMin/Max(int)  ──→ calibration range values
     │  │       ├── restart()             ──→ reset video to frame 0
@@ -78,23 +78,57 @@ When the user clicks "Confirm" or "Add Manually", the page switches immediately 
 Custom types used in cross-thread signal/slot connections (like `CalibUIState`) need `Q_DECLARE_METATYPE` visible **before** MOC-generated code instantiates the meta-type system. The macro must be placed in a header that is processed early in the translation unit — put it immediately after the struct definition, and include `<QObject>` before it.
 
 ## Pipeline Overview
-1. **Circle detection** — locate the gauge face in the frame (auto HoughCircles, fallback to manual 2-click)
-2. **Interactive calibration** — user clicks min/max scale markings, adjusts spinner values
-3. **Video processing loop** — detect needle angle per frame, map to value, overlay + write
+1. **Ellipse detection** — locate the gauge face via contour extraction + `cv::fitEllipse`
+2. **Homography computation** — maps fitted ellipse to frontal circle (auto or 5-click manual)
+3. **Interactive calibration** — user clicks min/max scale markings, adjusts spinner values
+4. **Video processing loop** — optical flow tracks camera movement, homography compensates off-axis distortion, detect needle angle per frame, map to value, overlay + write
 
-## Detection (`GaugeDetector::FindGauges`)
-- Tries 7 HoughCircles parameter sets (dp, canny, acc) *with* Gaussian blur (9×9, σ=2)
-- If all fail, retries the same 7 sets *without* blur
-- If still no detection → manual fallback: two-click UI (center then edge)
-- Radius bounds: `[maxDim/15, maxDim/2]`
+## Detection (`CircularGauge::FindGauges`)
+- Canny edge detection → dilate → `cv::findContours`
+- For each contour with ≥5 points: `cv::fitEllipse`
+- Filter: reject elongated ellipses (aspect ratio > 3:1), filter by area bounds
+- Compute homography from fitted ellipse via `HomographyFromEllipse`
+- Sort by area descending, deduplicate, keep top N
+- No HoughCircles — contour + fitEllipse is more robust for elliptical gauges
+
+## Homography (`HomographyFromEllipse`)
+From a `cv::RotatedRect` (fitted ellipse):
+1. Build conic matrix M from semi-axes and rotation angle
+2. Eigendecomposition of M → eigenvalues λ_big, λ_small
+3. Eigenvector for λ_small = semi-MAJOR axis direction
+4. `H_sub = √λ_big · v_big·v_bigᵀ + √λ_small · v_small·v_smallᵀ`
+5. Compose with translation to center circle at `(R, R)` in `2R×2R` output
+
+Same math used for both auto-detected and 5-click manual placement (`ComputeHomography` fits ellipse from points, then same eigendecomposition).
+
+## Manual Placement (5-click)
+- User clicks 5 points on the gauge perimeter (no center click)
+- `ComputeHomography` fits ellipse via `cv::fitEllipse`, computes center from fitted ellipse
+- Homography computed from the fitted ellipse (same path as auto-detection)
+- During placement: fitted `cv::RotatedRect` drawn as overlay, edge points shown with connecting polygon
+
+## Optical Flow + Homography (combined)
+Both work together for alignment compensation:
+- **Optical flow**: `goodFeaturesToTrack` + `calcOpticalFlowPyrLK` tracks feature points inside gauge face
+- Computes affine transform (rotation + uniform scale + translation) from reference frame to current
+- Updates `roi_.center` and `roi_.radius` based on tracked displacement
+- **Homography shift**: `H_new = H_base · T(-dx, -dy)` — only the translation component is adjusted
+- Base homography (`homographyBase_`) preserved; warp follows the moved ellipse each frame
+- Applied to ALL gauges (both auto-detected and manual)
 
 ## Calibration
 - User clicks minimum-value marking on the image, then maximum-value marking
-- Angles from clicks → `CalibrateFromPoints()` computes `startAngle`/`endAngle` (via `atan2`)
-- Spinner values → `SetCalibrationValues()` sets `minValue`/`maxValue`
+- Angles computed in rectified (circle) space via inverse warp of click points
+- Markers placed inset along ellipse perimeter (via rectified-space projection)
+- Calibration arc drawn by sampling points on circle in rectified space and inverse-warping
 - Supports multiple gauges; user calibrates one then advances to the next
 
-## Needle Detection (`GaugeDetector::DetectNeedle`)
+## Needle Detection (`CircularGauge::DetectNeedle`)
+When homography is active:
+- Frame warped to rectified view via `cv::warpPerspective`
+- Detection runs on rectified (circular) image
+- `detectionCenter()` returns `rectCenter_` (warped coords)
+
 Two methods, tried in order:
 ### a) Colored needle (`DetectColoredNeedle`)
 - HSV segmentation for red (two hue ranges: 0–10 and 160–179)
@@ -115,10 +149,11 @@ Two methods, tried in order:
 - 5-frame moving average via `deque`
 
 ## Overlay (`DrawOverlay`)
-- Colored circle around gauge face
-- Lines at min/max scale markings with value labels
-- Needle line from center to 80% radius
-- Value text at top-left
+- When homography active: all elements (circle outline, needle, scale lines, min/max labels) drawn by inverse-warping from rectified space back to original frame
+- When no homography: standard circle + needle overlay
+- Ellipse outline via `cv::ellipse(img, ellipseRect_, ...)`
+- Calibration arc drawn by sampling points on circle in rectified space and inverse-warping (not `cv::ellipse` with mismatched angles)
+- Min/max markers placed inset along ellipse via rectified-space projection
 
 ## Video Output
 - Codec: MJPG → `*_output.avi`
@@ -137,9 +172,10 @@ Run: `./build/gauges <video_path>`
 
 ## Files
 - `src/main.cpp` — MainWindow + VideoWidget implementation, `main()`
-- `src/main_window.h` — MainWindow + VideoWidget declarations
-- `src/worker.h` — Worker QObject class declaration
-- `src/worker.cpp` — Worker implementation (all processing logic)
-- `src/circular_gauge.h` — GaugeDetector class + shared types (AppMode, CalibUIState, GaugeROI, etc.)
-- `src/circular_gauge.cpp` — Detection/calibration/needle/overlay implementation
+- `inc/main_window.h` / `src/main_window.cpp` — MainWindow + VideoWidget declarations
+- `inc/worker.h` / `src/worker.cpp` — Worker QObject class + implementation (all processing logic)
+- `inc/circular_gauge.h` / `src/circular_gauge.cpp` — CircularGauge class (detection, calibration, needle, overlay, homography, optical flow)
+- `inc/detection_page.h` / `src/detection_page.cpp` — Detection UI page
+- `inc/calibration_page.h` / `src/calibration_page.cpp` — Calibration UI page
+- `inc/processing_page.h` / `src/processing_page.cpp` — Processing UI page
 - `CMakeLists.txt` — Build config (OpenCV + Qt6::Widgets)

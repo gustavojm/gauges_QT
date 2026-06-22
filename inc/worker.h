@@ -9,6 +9,7 @@
 #include <opencv2/opencv.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -46,7 +47,7 @@ struct DetectionState {
 
 struct CalibrationState {
     int draggingGaugeIdx = -1;
-    int draggingMarker = CircularGauge::kMarkerNone;
+    int draggingMarker = Gauge::kMarkerNone;
 };
 
 class Worker : public QObject {
@@ -106,7 +107,7 @@ private:
 
     cv::Mat firstFrame_;
     cv::Mat calibFrame_;
-    std::vector<CircularGauge> circularGauges_;
+    std::vector<std::unique_ptr<Gauge>> circularGauges_;
 
     DetectionState det_;
     CalibrationState cal_;

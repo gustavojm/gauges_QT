@@ -7,8 +7,6 @@
 #include <sstream>
 #include <string>
 
-int CircularGauge::next_number_ = 1;
-
 // ═══════════════════════════════════════════════════════════════════
 //  Static: Find all gauges in frame
 // ═══════════════════════════════════════════════════════════════════
@@ -253,20 +251,6 @@ double CircularGauge::DetectNeedleRadial(const cv::Mat& frame) const {
     return bestAngle;
 }
 
-void CircularGauge::AddReading(double value) {
-    if (value >= 0) {
-        value_history_.push_back(value);
-        if (value_history_.size() > smooth_window_) value_history_.pop_front();
-    }
-
-    smoothed_value_ = value;
-    if (!value_history_.empty()) {
-        smoothed_value_ =
-            std::accumulate(value_history_.begin(), value_history_.end(), 0.0) /
-            value_history_.size();
-    }
-}
-
 double CircularGauge::DetectNeedle(const cv::Mat& frame) {
     if (hasHomography_) {
         cv::Mat warped = WarpFrame(frame);
@@ -318,6 +302,7 @@ void CircularGauge::FinalizeCalibration() {
 }
 
 void CircularGauge::SetCalibrationValues(double minVal, double maxVal) {
+    Gauge::SetCalibrationValues(minVal, maxVal);
     scale_.min_value = minVal;
     scale_.max_value = maxVal;
     scale_.valid = true;
@@ -362,7 +347,7 @@ double CircularGauge::AngleToValue(double needleAngle) const {
 //  Overlay Drawing
 // ═══════════════════════════════════════════════════════════════════
 
-void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
+void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) {
     if (roi_.radius > 0) {
         if (hasHomography_) {
             // When homography is active, draw the warped circle outline
@@ -490,7 +475,7 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
 //  Calibration Overlay Drawing
 // ═══════════════════════════════════════════════════════════════════
 
-void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) const {
+void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) {
     if (pt_min_ == cv::Point() && pt_max_ == cv::Point()) return;
 
     int thickness = 1;
@@ -618,23 +603,9 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) const {
     }
 }
 
-double CircularGauge::smoothedValue() const { return smoothed_value_; }
-
-cv::Scalar CircularGauge::NextColor() {
-    static const std::vector<cv::Scalar> palette = {
-        {0, 0, 255},      // red
-        {255, 0, 0},      // blue
-        {0, 255, 255},    // yellow
-        {255, 0, 255},    // magenta
-        {255, 255, 0},    // cyan
-        {0, 165, 255},    // orange
-        {128, 0, 128},    // purple
-        {203, 192, 255},  // pink
-        {0, 255, 0},      // green
-    };
-    static size_t idx = 0;
-    return palette[idx++ % palette.size()];
-}
+// ═══════════════════════════════════════════════════════════════════
+//  Static helpers
+// ═══════════════════════════════════════════════════════════════════
 
 int CircularGauge::HandleClick(int clickX, int clickY) {
     int thresh = std::max(roi_.radius / 6, static_cast<int>(kHitTestMinThresh));
@@ -692,12 +663,6 @@ int CircularGauge::HandleClick(int clickX, int clickY) {
 //  Static helpers
 // ═══════════════════════════════════════════════════════════════════
 
-void CircularGauge::DrawGaugeNumber(cv::Mat& img) const {
-    cv::putText(img, std::to_string(number_),
-                roi_.center - cv::Point(8, 8),
-                cv::FONT_HERSHEY_SIMPLEX, 0.8, color_, 2);
-}
-
 void CircularGauge::DrawOutline(cv::Mat& img) const {
     if (roi_.radius <= 0) return;
     if (hasHomography_) {
@@ -709,10 +674,9 @@ void CircularGauge::DrawOutline(cv::Mat& img) const {
 }
 
 CircularGauge::CircularGauge(const cv::Point& center, int radius,
-                             const cv::Scalar& color) {
-    roi_ = {center, radius};
-    color_ = color;
-    number_ = next_number_++;
+                             const cv::Scalar& color)
+    : Gauge(center, radius, color)
+{
     // Default markers at 135° (top-right) and 45° (top-left)
     double a = 3.0 * kPi / 4.0;
     pt_min_ = center + cv::Point(cvRound(radius * std::cos(a)),

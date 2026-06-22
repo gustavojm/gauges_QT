@@ -27,9 +27,9 @@ void drawDashedCircle(cv::Mat& img, cv::Point center, int radius,
     }
 }
 
-void drawAllGauges(cv::Mat& img, const std::vector<CircularGauge>& detectors) {
+void drawAllGauges(cv::Mat& img, const std::vector<std::unique_ptr<Gauge>>& detectors) {
     for (const auto& g : detectors)
-        g.DrawOutline(img);
+        g->DrawOutline(img);
 }
 
 } // namespace
@@ -226,8 +226,8 @@ void Worker::handleDetectionClick(int x, int y) {
 void Worker::handleCalibrationClick(int x, int y) {
     // Hit-test markers on all gauges and start drag if a marker was hit
     for (size_t i = 0; i < circularGauges_.size(); i++) {
-        int hit = circularGauges_[i].HandleClick(x, y);
-        if (hit != CircularGauge::kMarkerNone) {
+        int hit = circularGauges_[i]->HandleClick(x, y);
+        if (hit != Gauge::kMarkerNone) {
             cal_.draggingGaugeIdx = static_cast<int>(i);
             cal_.draggingMarker = hit;
             break;
@@ -251,7 +251,7 @@ void Worker::publishCalibrationDisplay() {
     drawAllGauges(disp, circularGauges_);
 
     for (const auto& d : circularGauges_)
-        d.DrawCalibrationOverlay(disp);
+        d->DrawCalibrationOverlay(disp);
 
     emit frameReady(matToQImage(disp));
 }
@@ -264,10 +264,10 @@ void Worker::refreshCalibData() {
     calibData_.resize(static_cast<int>(circularGauges_.size()));
     auto out = calibData_.begin();
     for (const auto& d : circularGauges_) {
-        out->value = d.smoothedValue();
-        out->minValue = d.scale().min_value;
-        out->maxValue = d.scale().max_value;
-        out->colorRgb = bgrToRgb(d.color());
+        out->value = d->smoothedValue();
+        out->minValue = d->minValue();
+        out->maxValue = d->maxValue();
+        out->colorRgb = bgrToRgb(d->color());
         ++out;
     }
     emit calibrationDataReady(calibData_);
@@ -275,7 +275,7 @@ void Worker::refreshCalibData() {
 
 void Worker::updateGaugeValues() {
     for (int i = 0; i < calibData_.size(); ++i)
-        calibData_[i].value = circularGauges_[i].smoothedValue();
+        calibData_[i].value = circularGauges_[i]->smoothedValue();
     emit liveValuesUpdated(calibData_);
 }
 
@@ -295,25 +295,24 @@ void Worker::confirmGauges() {
     circularGauges_.clear();
     for (size_t i = 0; i < det_.rois.size(); i++) {
         const auto& g = det_.rois[i];
-        circularGauges_.emplace_back(g.center, g.radius, CircularGauge::NextColor());
+        auto gauge = std::make_unique<CircularGauge>(g.center, g.radius,
+                                                      CircularGauge::NextColor());
 
         // Use homography from ROI (auto-detected) if available
         if (!g.H.empty()) {
-            circularGauges_.back().SetHomography(g.H, g.outSize,
-                                                  g.center, g.ellipse);
+            gauge->SetHomography(g.H, g.outSize, g.center, g.ellipse);
         }
         // Otherwise use manual homography if one was computed
         else if (i < det_.homographies.size()) {
             const auto& hd = det_.homographies[i];
-            circularGauges_.back().SetHomography(hd.H, hd.outSize,
-                                                  hd.center, hd.ellipseRect);
+            gauge->SetHomography(hd.H, hd.outSize, hd.center, hd.ellipseRect);
         }
 
-        std::cout << "  >> Gauge " << (circularGauges_.size() - 1)
+        std::cout << "  >> Gauge " << (circularGauges_.size())
                   << " at (" << g.center.x << ", " << g.center.y
                   << "), radius=" << g.radius
-                  << (circularGauges_.back().hasHomography() ?
-                          " [homography]" : "") << "\n";
+                  << (gauge->hasHomography() ? " [homography]" : "") << "\n";
+        circularGauges_.push_back(std::move(gauge));
     }
     det_.rois.clear();
     det_.homographies.clear();
@@ -325,12 +324,15 @@ void Worker::confirmCalib() {
     if (mode_ != AppMode::kCalibration || circularGauges_.empty()) return;
 
     for (auto& d : circularGauges_) {
-        d.FinalizeCalibration();
-        const auto& s = d.scale();
-        std::cout << "  >> Gauge scale: " << s.min_value << " at "
-                  << (s.start_angle * 180.0 / kPi) << " deg, "
-                  << s.max_value << " at "
-                  << (s.end_angle * 180.0 / kPi) << " deg\n";
+        d->FinalizeCalibration();
+        // Log circular-specific scale info
+        if (auto* cg = dynamic_cast<CircularGauge*>(d.get())) {
+            const auto& s = cg->scale();
+            std::cout << "  >> Gauge scale: " << s.min_value << " at "
+                      << (s.start_angle * 180.0 / kPi) << " deg, "
+                      << s.max_value << " at "
+                      << (s.end_angle * 180.0 / kPi) << " deg\n";
+        }
     }
     enterProcessing();
 }
@@ -338,7 +340,7 @@ void Worker::confirmCalib() {
 void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
     if (idx < 0 || idx >= static_cast<int>(circularGauges_.size())) return;
     auto& d = circularGauges_[idx];
-    d.SetCalibrationValues(minVal, maxVal);
+    d->SetCalibrationValues(minVal, maxVal);
     if (mode_ == AppMode::kCalibration)
         publishCalibrationDisplay();
 }
@@ -378,16 +380,16 @@ void Worker::processNextFrame() {
         // (skip for gauges that use homography-based rectification)
         if (!motionInitialized_) {
             for (auto& d : circularGauges_) {
-                d.InitMotionFeatures(frame);
+                d->InitMotionFeatures(frame);
             }
             motionInitialized_ = true;
         }
 
         int labelY = 60;
         for (auto& d : circularGauges_) {
-            d.UpdateROI(frame);
-            d.DetectNeedle(frame);
-            d.DrawOverlay(frame, labelY);
+            d->UpdateROI(frame);
+            d->DetectNeedle(frame);
+            d->DrawOverlay(frame, labelY);
             labelY += 30;
         }
 
@@ -407,7 +409,7 @@ void Worker::restart() {
     if (mode_ != AppMode::kProcessing) return;
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
         std::cerr << "Warning: Could not reset to frame 0 in restart()\n";
-    for (auto& d : circularGauges_) d.ResetSmoothing();
+    for (auto& d : circularGauges_) d->ResetSmoothing();
     frameCount_ = 0;
     motionInitialized_ = false;
     chainTimer_.start(0, this);
@@ -427,19 +429,19 @@ void Worker::timerEvent(QTimerEvent* event) {
 // ═══════════════════════════════════════════════════════════════════
 
 void Worker::onDragMove(int x, int y) {
-    if (cal_.draggingMarker == CircularGauge::kMarkerNone) return;
+    if (cal_.draggingMarker == Gauge::kMarkerNone) return;
     if (mode_ != AppMode::kCalibration) return;
     if (cal_.draggingGaugeIdx < 0 ||
         static_cast<size_t>(cal_.draggingGaugeIdx) >= circularGauges_.size())
         return;
 
     auto& d = circularGauges_[static_cast<size_t>(cal_.draggingGaugeIdx)];
-    d.MoveMarker(cal_.draggingMarker, cv::Point(x, y));
+    d->MoveMarker(cal_.draggingMarker, cv::Point(x, y));
     publishCalibrationDisplay();
 }
 
 void Worker::onDragRelease() {
-    cal_.draggingMarker = CircularGauge::kMarkerNone;
+    cal_.draggingMarker = Gauge::kMarkerNone;
     cal_.draggingGaugeIdx = -1;
 }
 
