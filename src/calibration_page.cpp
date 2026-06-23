@@ -70,6 +70,14 @@ void CalibrationPage::connectToWorker(Worker* worker) {
             worker, &Worker::quit);
     connect(this, &CalibrationPage::gaugeCalibRangeChanged,
             worker, &Worker::setGaugeCalibRange);
+    connect(this, &CalibrationPage::alarmEnableChanged,
+            worker, &Worker::setAlarmEnabled);
+    connect(this, &CalibrationPage::alarmDirectionChanged,
+            worker, &Worker::setAlarmDirection);
+    connect(this, &CalibrationPage::alarmThresholdChanged,
+            worker, &Worker::setAlarmThreshold);
+    connect(this, &CalibrationPage::tagChanged,
+            worker, &Worker::setTag);
     connect(worker, &Worker::calibrationDataReady,
             this, &CalibrationPage::onCalibrationDataReady);
 }

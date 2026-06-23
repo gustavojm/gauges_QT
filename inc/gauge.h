@@ -4,11 +4,13 @@
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <optional>
+#include <string>
 
 // ─── Shared Types ─────────────────────────────────────────────────
 
 enum class AppMode { kDetection, kCalibration, kProcessing };
 enum class GaugeType { kCircular, kEdgewise };
+enum class AlarmDirection { kLessThan, kGreaterThan };
 
 // ─── Named constants ─────────────────────────────────────────────
 
@@ -48,6 +50,10 @@ public:
     bool isManual() const { return isManual_; }
     void setManual(bool manual) { isManual_ = manual; }
 
+    // ─── Tag ──────────────────────────────────────────────────────
+    void setTag(const std::string& tag) { tag_ = tag; }
+    const std::string& tag() const { return tag_; }
+
     // ─── Static: Color palette ────────────────────────────────────
     static cv::Scalar NextColor();
 
@@ -60,6 +66,15 @@ public:
     void AddReading(std::optional<double> reading);
     std::optional<double> smoothedValue() const { return smoothed_reading_; }
     void ResetSmoothing();
+
+    // ─── Alarm ────────────────────────────────────────────────────
+    void setAlarmEnabled(bool enabled) { alarmEnabled_ = enabled; }
+    void setAlarmDirection(AlarmDirection dir) { alarmDirection_ = dir; }
+    void setAlarmThreshold(double threshold) { alarmThreshold_ = threshold; }
+    bool alarmEnabled() const { return alarmEnabled_; }
+    AlarmDirection alarmDirection() const { return alarmDirection_; }
+    double alarmThreshold() const { return alarmThreshold_; }
+    bool checkAlarm() const;
 
     // ─── Motion State Reset ───────────────────────────────────────
     virtual void ResetMotionState();
@@ -103,10 +118,16 @@ protected:
     std::optional<double> last_reading_ = std::nullopt;
     std::optional<double> smoothed_reading_ = std::nullopt;
 
+    // Alarm
+    bool alarmEnabled_ = false;
+    AlarmDirection alarmDirection_ = AlarmDirection::kGreaterThan;
+    double alarmThreshold_ = 0;
+
     // Gauge identification
     int number_ = 0;
     static int next_number_;
     bool isManual_ = false;
+    std::string tag_;
 
     // Motion compensation state
     cv::Mat ref_gray_;

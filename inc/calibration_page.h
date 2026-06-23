@@ -26,6 +26,10 @@ signals:
     void confirmCalibClicked();
     void cancelCalibClicked();
     void gaugeCalibRangeChanged(int idx, double minVal, double maxVal);
+    void alarmEnableChanged(int idx, bool enabled);
+    void alarmDirectionChanged(int idx, AlarmDirection direction);
+    void alarmThresholdChanged(int idx, double threshold);
+    void tagChanged(int idx, const QString& tag);
 
 private:
     void rebuildCollapsibleSections(const QVector<GaugeCalibData>& calib);

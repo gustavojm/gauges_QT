@@ -23,11 +23,16 @@ public slots:
     void onFrameCountUpdated(int current, int total);
     void createCollapsibleSections(const QVector<GaugeCalibData>& calib);
     void onLiveValuesUpdated(const QVector<GaugeCalibData>& calib);
+    void onAlarmTriggered(int gaugeIdx, bool triggered);
 
 signals:
     void restartClicked();
     void quitClicked();
     void gaugeCalibRangeChanged(int idx, double minVal, double maxVal);
+    void alarmEnableChanged(int idx, bool enabled);
+    void alarmDirectionChanged(int idx, AlarmDirection direction);
+    void alarmThresholdChanged(int idx, double threshold);
+    void tagChanged(int idx, const QString& tag);
 
 private:
     QLabel* frameCountLabel_ = nullptr;

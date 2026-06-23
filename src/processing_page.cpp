@@ -62,7 +62,23 @@ void ProcessingPage::createCollapsibleSections(const QVector<GaugeCalibData>& ca
 void ProcessingPage::onLiveValuesUpdated(const QVector<GaugeCalibData>& calib) {
     for (size_t i = 0; i < sections_.size() && i < static_cast<size_t>(calib.size()); i++) {
         sections_[i].section->setTitle(
-            gaugeTitle(i, calib[i].value));
+            gaugeTitle(i, calib[i].value, calib[i].alarmTriggered));
+    }
+}
+
+void ProcessingPage::onAlarmTriggered(int gaugeIdx, bool triggered) {
+    if (gaugeIdx < 0 || gaugeIdx >= static_cast<int>(sections_.size()))
+        return;
+
+    auto* section = sections_[gaugeIdx].section;
+    if (triggered) {
+        section->setStyleSheet(
+            "ui--QCollapsibleSection { background: #8B0000; border-radius: 4px; }"
+            "ui--QCollapsibleSection QToolButton { color: white; }");
+    } else {
+        section->setStyleSheet(
+            "ui--QCollapsibleSection { background: #2a2a32; border-radius: 4px; }"
+            "ui--QCollapsibleSection QToolButton { color: black; }");
     }
 }
 
@@ -73,10 +89,20 @@ void ProcessingPage::connectToWorker(Worker* worker) {
             worker, &Worker::quit);
     connect(this, &ProcessingPage::gaugeCalibRangeChanged,
             worker, &Worker::setGaugeCalibRange);
+    connect(this, &ProcessingPage::alarmEnableChanged,
+            worker, &Worker::setAlarmEnabled);
+    connect(this, &ProcessingPage::alarmDirectionChanged,
+            worker, &Worker::setAlarmDirection);
+    connect(this, &ProcessingPage::alarmThresholdChanged,
+            worker, &Worker::setAlarmThreshold);
+    connect(this, &ProcessingPage::tagChanged,
+            worker, &Worker::setTag);
     connect(worker, &Worker::calibrationDataReady,
             this, &ProcessingPage::createCollapsibleSections);
     connect(worker, &Worker::liveValuesUpdated,
             this, &ProcessingPage::onLiveValuesUpdated);
     connect(worker, &Worker::frameCountUpdated,
             this, &ProcessingPage::onFrameCountUpdated);
+    connect(worker, &Worker::alarmTriggered,
+            this, &ProcessingPage::onAlarmTriggered);
 }

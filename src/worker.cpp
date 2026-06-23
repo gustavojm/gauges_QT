@@ -302,8 +302,19 @@ void Worker::refreshCalibData() {
 }
 
 void Worker::updateGaugeValues() {
-    for (int i = 0; i < calibData_.size(); ++i)
+    for (int i = 0; i < calibData_.size(); ++i) {
         calibData_[i].value = gauges_[i]->smoothedValue();
+        calibData_[i].alarmEnabled = gauges_[i]->alarmEnabled();
+        calibData_[i].alarmDirection = gauges_[i]->alarmDirection();
+        calibData_[i].alarmThreshold = gauges_[i]->alarmThreshold();
+        calibData_[i].tag = QString::fromStdString(gauges_[i]->tag());
+
+        bool triggered = gauges_[i]->checkAlarm();
+        if (calibData_[i].alarmTriggered != triggered) {
+            calibData_[i].alarmTriggered = triggered;
+            emit alarmTriggered(i, triggered);
+        }
+    }
     emit liveValuesUpdated(calibData_);
 }
 
@@ -359,6 +370,26 @@ void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
     d->SetCalibrationValues(minVal, maxVal);
     if (mode_ == AppMode::kCalibration)
         publishCalibrationDisplay();
+}
+
+void Worker::setAlarmEnabled(int idx, bool enabled) {
+    if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
+    gauges_[idx]->setAlarmEnabled(enabled);
+}
+
+void Worker::setAlarmDirection(int idx, AlarmDirection direction) {
+    if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
+    gauges_[idx]->setAlarmDirection(direction);
+}
+
+void Worker::setAlarmThreshold(int idx, double threshold) {
+    if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
+    gauges_[idx]->setAlarmThreshold(threshold);
+}
+
+void Worker::setTag(int idx, const QString& tag) {
+    if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
+    gauges_[idx]->setTag(tag.toStdString());
 }
 
 // ═══════════════════════════════════════════════════════════════════

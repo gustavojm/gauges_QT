@@ -77,6 +77,17 @@ void Gauge::ResetSmoothing() {
     smoothed_reading_ = std::nullopt;
 }
 
+bool Gauge::checkAlarm() const {
+    if (!alarmEnabled_ || !smoothed_reading_.has_value())
+        return false;
+
+    double val = *smoothed_reading_;
+    if (alarmDirection_ == AlarmDirection::kGreaterThan)
+        return val > alarmThreshold_;
+    else
+        return val < alarmThreshold_;
+}
+
 void Gauge::ResetMotionState() {
     roi_ = roi_ref_;
 }

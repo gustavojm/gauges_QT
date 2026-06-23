@@ -3,6 +3,7 @@
 #include <QBasicTimer>
 #include <QImage>
 #include <QObject>
+#include <QString>
 #include <QTimerEvent>
 #include <QVector>
 
@@ -21,6 +22,11 @@ struct GaugeCalibData {
     double minValue = 0;
     double maxValue = 1000;
     uint32_t colorRgb = 0x00FF00;
+    bool alarmEnabled = false;
+    AlarmDirection alarmDirection = AlarmDirection::kGreaterThan;
+    double alarmThreshold = 0;
+    bool alarmTriggered = false;
+    QString tag;
 };
 
 Q_DECLARE_METATYPE(GaugeCalibData)
@@ -60,6 +66,7 @@ signals:
     void manualInstructionChanged(int stage);
     void gaugeTypeChanged(int typeIndex);
     void finished();
+    void alarmTriggered(int gaugeIdx, bool triggered);
 
 public slots:
     void start();
@@ -70,6 +77,10 @@ public slots:
     void confirmGauges();
     void confirmCalib();
     void setGaugeCalibRange(int idx, double minVal, double maxVal);
+    void setAlarmEnabled(int idx, bool enabled);
+    void setAlarmDirection(int idx, AlarmDirection direction);
+    void setAlarmThreshold(int idx, double threshold);
+    void setTag(int idx, const QString& tag);
     void onDragMove(int x, int y);
     void onDragRelease();
     void restart();
