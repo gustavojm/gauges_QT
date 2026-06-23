@@ -1117,3 +1117,46 @@ void CircularGauge::UpdateROI(const cv::Mat& frame) {
     prev_gray_ = gray.clone();
     prev_features_ = currentPts;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  Manual Placement Instructions
+// ═══════════════════════════════════════════════════════════════════
+
+const char* CircularGauge::manualInstruction(int stage) {
+    switch (stage) {
+    case 0: return "Click 5 points on the EDGE of the gauge face";
+    case 1: return "Edge point 1/5 placed \u2014 click point 2";
+    case 2: return "Edge point 2/5 placed \u2014 click point 3";
+    case 3: return "Edge point 3/5 placed \u2014 click point 4";
+    case 4: return "Edge point 4/5 placed \u2014 click point 5";
+    default: return "";
+    }
+}
+
+std::optional<CircularGauge::ROI> CircularGauge::FitFromManualEdges(
+    const std::vector<cv::Point>& edges) {
+    if (edges.size() < kManualClicks)
+        return std::nullopt;
+
+    ROI result;
+    cv::Mat H;
+    cv::Size outSize;
+    cv::RotatedRect ellipseRect;
+    cv::Point inferredCenter;
+    if (ComputeHomography(edges, H, outSize, ellipseRect, inferredCenter)) {
+        result.center = inferredCenter;
+        result.radius = cvRound(std::min(outSize.width, outSize.height) * 0.5);
+        result.ellipse = ellipseRect;
+        result.hasEllipse = true;
+        result.H = H;
+        result.outSize = outSize;
+        std::cout << "  >> Manual gauge at ("
+                  << inferredCenter.x << ", " << inferredCenter.y
+                  << "), warped to " << outSize.width << "x"
+                  << outSize.height << "\n";
+    } else {
+        std::cerr << "  >> Ellipse fit failed — points may be "
+                     "collinear or not form an ellipse.\n";
+    }
+    return result;
+}

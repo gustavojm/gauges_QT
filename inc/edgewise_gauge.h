@@ -59,6 +59,12 @@ public:
     const cv::Rect& bezelRect() const { return bezelRect_; }
     InstrumentOrientation orientation() const { return orientation_; }
 
+    // ─── Edgewise-specific: manual placement ──────────────────────
+    static constexpr int kManualClicks = 4;
+    static const char* manualInstruction(int stage);
+    static std::optional<cv::Rect> FitFromManualEdges(
+        const std::vector<cv::Point>& edges);
+
 private:
     // Bezel geometry
     cv::Rect bezelRect_;

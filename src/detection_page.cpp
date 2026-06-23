@@ -9,6 +9,9 @@
 #include <QSlider>
 #include <QVBoxLayout>
 
+#include "circular_gauge.h"
+#include "edgewise_gauge.h"
+
 namespace {
 constexpr int kBtnWide = 120;
 }
@@ -35,7 +38,12 @@ DetectionPage::DetectionPage(QWidget* parent)
     gaugeTypeCombo_->setCurrentIndex(0);
     thl->addWidget(gaugeTypeCombo_, 1);
     connect(gaugeTypeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &DetectionPage::gaugeTypeChanged);
+            this, [this](int index) {
+                isEdgewise_ = (index == 1);
+                emit gaugeTypeChanged(index);
+                if (manualCb_->isChecked())
+                    onManualInstructionChanged(0);
+            });
     lay->addWidget(typeRow);
 
     cannyRow_ = new QWidget(this);
@@ -106,28 +114,10 @@ void DetectionPage::onManualPlacementActivated(bool active) {
 }
 
 void DetectionPage::onManualInstructionChanged(int stage) {
-    switch (stage) {
-    case 0:
-        instructionLabel_->setText(
-            "Click 5 points on the EDGE of the gauge face");
-        break;
-    case 1:
-        instructionLabel_->setText(
-            "Edge point 1/5 placed — click point 2");
-        break;
-    case 2:
-        instructionLabel_->setText(
-            "Edge point 2/5 placed — click point 3");
-        break;
-    case 3:
-        instructionLabel_->setText(
-            "Edge point 3/5 placed — click point 4");
-        break;
-    case 4:
-        instructionLabel_->setText(
-            "Edge point 4/5 placed — click point 5");
-        break;
-    }
+    const char* text = isEdgewise_
+        ? EdgewiseGauge::manualInstruction(stage)
+        : CircularGauge::manualInstruction(stage);
+    instructionLabel_->setText(QString::fromUtf8(text));
 }
 
 void DetectionPage::connectToWorker(Worker* worker) {

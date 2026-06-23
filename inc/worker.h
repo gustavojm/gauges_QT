@@ -26,26 +26,15 @@ struct GaugeCalibData {
 Q_DECLARE_METATYPE(GaugeCalibData)
 
 struct DetectionState {
-    std::vector<CircularGauge::ROI> rois;
-    std::vector<cv::Rect> edgewiseRois;
+    std::vector<std::unique_ptr<Gauge>> gauges;
     GaugeType activeType = GaugeType::kCircular;
     bool manualPlacement = false;
     int canny = 320;
     int acc = 40;
 
-    // 5-click manual placement state (perimeter points only)
     enum class ManualStage { kEdge1, kEdge2, kEdge3, kEdge4, kEdge5 };
     ManualStage manualStage = ManualStage::kEdge1;
     std::vector<cv::Point> manualEdges;
-
-    // Per-gauge homography data (parallels rois vector)
-    struct HomographyData {
-        cv::Mat H;
-        cv::Size outSize;
-        cv::Point center;       // inferred from the conic fit
-        cv::RotatedRect ellipseRect;
-    };
-    std::vector<HomographyData> homographies;
 };
 
 struct CalibrationState {
@@ -112,7 +101,7 @@ private:
 
     cv::Mat firstFrame_;
     cv::Mat calibFrame_;
-    std::vector<std::unique_ptr<Gauge>> circularGauges_;
+    std::vector<std::unique_ptr<Gauge>> gauges_;
 
     DetectionState det_;
     CalibrationState cal_;

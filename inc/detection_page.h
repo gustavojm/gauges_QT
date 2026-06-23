@@ -40,4 +40,5 @@ private:
     QLabel* gaugeCountLabel_ = nullptr;
     QLabel* instructionLabel_ = nullptr;
     QPushButton* confirmBtn_ = nullptr;
+    bool isEdgewise_ = false;
 };

@@ -562,3 +562,30 @@ void EdgewiseGauge::DrawOverlay(cv::Mat& frame, int labelY) {
     cv::putText(frame, oss.str(), cv::Point(30, labelY),
                 cv::FONT_HERSHEY_SIMPLEX, 1.2, cv::Scalar(0, 255, 255), 3);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  Manual Placement Instructions
+// ═══════════════════════════════════════════════════════════════════
+
+const char* EdgewiseGauge::manualInstruction(int stage) {
+    switch (stage) {
+    case 0: return "Click 4 CORNERS of the rectangular bezel";
+    case 1: return "Corner 1/4 placed \u2014 click corner 2";
+    case 2: return "Corner 2/4 placed \u2014 click corner 3";
+    case 3: return "Corner 3/4 placed \u2014 click corner 4";
+    default: return "";
+    }
+}
+
+std::optional<cv::Rect> EdgewiseGauge::FitFromManualEdges(
+    const std::vector<cv::Point>& edges) {
+    if (edges.size() < kManualClicks)
+        return std::nullopt;
+
+    auto boundingRect = cv::boundingRect(edges);
+    std::cout << "  >> Manual edgewise gauge at ("
+              << boundingRect.x << ", " << boundingRect.y
+              << "), " << boundingRect.width << "x" << boundingRect.height
+              << "\n";
+    return boundingRect;
+}

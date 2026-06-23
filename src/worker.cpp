@@ -83,8 +83,16 @@ void Worker::start() {
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
         std::cerr << "Warning: Could not reset to frame 0 in start()\n";
 
-    det_.rois = CircularGauge::FindGauges(firstFrame_, det_.canny, det_.acc);
-    det_.edgewiseRois = EdgewiseGauge::FindGauges(firstFrame_, det_.canny);
+    det_.gauges.clear();
+    for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, det_.acc)) {
+        auto g = std::make_unique<CircularGauge>(roi.center, roi.radius,
+                                                   Gauge::NextColor());
+        if (!roi.H.empty())
+            g->SetHomography(roi.H, roi.outSize, roi.center, roi.ellipse);
+        det_.gauges.push_back(std::move(g));
+    }
+    for (const auto& roi : EdgewiseGauge::FindGauges(firstFrame_, det_.canny))
+        det_.gauges.push_back(std::make_unique<EdgewiseGauge>(roi, Gauge::NextColor()));
     displayDetectionOverlay();
     emit modeChanged(AppMode::kDetection);
 }
@@ -96,32 +104,27 @@ void Worker::start() {
 void Worker::displayDetectionOverlay() {
     cv::Mat disp = firstFrame_.clone();
     const cv::Scalar color = {0, 0, 255};
-    for (const auto& roi : det_.rois) {
-        if (roi.hasEllipse) {
-            cv::ellipse(disp, roi.ellipse, color, 2);
-        } else {
-            cv::circle(disp, roi.center, roi.radius, color, 2);
-        }
-        cv::putText(disp, std::to_string(roi.radius),
-                    roi.center + cv::Point(-20, 5),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1);
-    }
-    for (const auto& r : det_.edgewiseRois) {
-        cv::rectangle(disp, r, color, 2);
-        cv::Point center(r.x + r.width / 2, r.y + r.height / 2);
-        cv::putText(disp, std::to_string(r.width),
-                    center + cv::Point(-20, 5),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1);
+    for (const auto& g : det_.gauges) {
+        g->DrawOutline(disp);
     }
     emit frameReady(matToQImage(disp));
-    emit detectionCountChanged(det_.rois.size() + det_.edgewiseRois.size());
+    emit detectionCountChanged(det_.gauges.size());
 }
 
 void Worker::reRunDetection() {
+    det_.gauges.clear();
     if (det_.activeType == GaugeType::kCircular) {
-        det_.rois = CircularGauge::FindGauges(firstFrame_, det_.canny, det_.acc);
+        for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, det_.acc)) {
+            auto g = std::make_unique<CircularGauge>(roi.center, roi.radius,
+                                                       Gauge::NextColor());
+            if (!roi.H.empty())
+                g->SetHomography(roi.H, roi.outSize, roi.center, roi.ellipse);
+            det_.gauges.push_back(std::move(g));
+        }
     } else {
-        det_.edgewiseRois = EdgewiseGauge::FindGauges(firstFrame_, det_.canny);
+        for (const auto& roi : EdgewiseGauge::FindGauges(firstFrame_, det_.canny))
+            det_.gauges.push_back(
+                std::make_unique<EdgewiseGauge>(roi, Gauge::NextColor()));
     }
     displayDetectionOverlay();
 }
@@ -165,7 +168,7 @@ void Worker::onImageClicked(int x, int y) {
 
     if (mode_ == AppMode::kDetection && det_.manualPlacement)
         handleDetectionClick(x, y);
-    else if (mode_ == AppMode::kCalibration && !circularGauges_.empty())
+    else if (mode_ == AppMode::kCalibration && !gauges_.empty())
         handleCalibrationClick(x, y);
 }
 
@@ -175,69 +178,44 @@ void Worker::handleDetectionClick(int x, int y) {
     det_.manualEdges.push_back(click);
     int n = static_cast<int>(det_.manualEdges.size());
 
-    int requiredClicks = (det_.activeType == GaugeType::kEdgewise) ? 4 : 5;
-
-    if (n < requiredClicks) {
-        emit manualInstructionChanged(n);
-    } else {
-        if (det_.activeType == GaugeType::kEdgewise) {
-            // 4 corner clicks → compute bounding rect
-            cv::Rect bbox = cv::boundingRect(det_.manualEdges);
-            det_.edgewiseRois.push_back(bbox);
-            std::cout << "  >> Manual edgewise gauge at ("
-                      << bbox.x << ", " << bbox.y
-                      << "), " << bbox.width << "x" << bbox.height << "\n";
-        } else {
-            // All 5 perimeter points collected — fit ellipse and compute homography
-            cv::Mat H;
-            cv::Size outSize;
-            cv::RotatedRect ellipseRect;
-            cv::Point inferredCenter;
-            if (CircularGauge::ComputeHomography(det_.manualEdges, H, outSize,
-                                                 ellipseRect, inferredCenter)) {
-                int r = cvRound(std::min(outSize.width, outSize.height) * 0.5);
-                det_.rois.push_back({inferredCenter, r});
-                det_.homographies.push_back(
-                    {H, outSize, inferredCenter, ellipseRect});
-
-                std::cout << "  >> Manual gauge at ("
-                          << inferredCenter.x << ", "
-                          << inferredCenter.y
-                          << "), warped to " << outSize.width << "x"
-                          << outSize.height << "\n";
-            } else {
-                std::cerr << "  >> Ellipse fit failed — points may be "
-                             "collinear or not form an ellipse.\n";
+    bool created = false;
+    switch (det_.activeType) {
+        case GaugeType::kEdgewise: {
+            auto roi = EdgewiseGauge::FitFromManualEdges(det_.manualEdges);
+            if (roi) {
+                det_.gauges.push_back(
+                    std::make_unique<EdgewiseGauge>(*roi, Gauge::NextColor()));
+                created = true;
             }
+            break;
         }
+        case GaugeType::kCircular: {
+            auto roi = CircularGauge::FitFromManualEdges(det_.manualEdges);
+            if (roi && !roi->H.empty()) {
+                auto g = std::make_unique<CircularGauge>(
+                    roi->center, roi->radius, Gauge::NextColor());
+                g->SetHomography(roi->H, roi->outSize, roi->center, roi->ellipse);
+                det_.gauges.push_back(std::move(g));
+                created = true;
+            }
+            break;
+        }
+    }
 
+    if (created) {
         det_.manualEdges.clear();
         det_.manualStage = DetectionState::ManualStage::kEdge1;
         emit manualInstructionChanged(0);
+    } else {
+        emit manualInstructionChanged(n);
     }
 
     // Draw overlay
     cv::Mat disp = firstFrame_.clone();
     int label = 1;
-    for (size_t i = 0; i < det_.rois.size(); i++) {
-        const auto& g = det_.rois[i];
-        if (i < det_.homographies.size()) {
-            const auto& hd = det_.homographies[i];
-            cv::ellipse(disp, hd.ellipseRect, cv::Scalar(0, 255, 0), 2,
-                        cv::LINE_AA);
-        } else {
-            cv::circle(disp, g.center, g.radius, cv::Scalar(0, 255, 0), 2);
-        }
-        cv::putText(disp, std::to_string(label++),
-                    g.center - cv::Point(8, 8),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
-    }
-    for (const auto& r : det_.edgewiseRois) {
-        cv::rectangle(disp, r, cv::Scalar(0, 255, 0), 2);
-        cv::Point center(r.x + r.width / 2, r.y + r.height / 2);
-        cv::putText(disp, std::to_string(label++),
-                    center - cv::Point(8, 8),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
+    for (const auto& g : det_.gauges) {
+        g->DrawOutline(disp);
+        label++;
     }
 
     // Draw placed edge points and lines between them
@@ -256,13 +234,13 @@ void Worker::handleDetectionClick(int x, int y) {
     }
 
     emit frameReady(matToQImage(disp));
-    emit detectionCountChanged(det_.rois.size() + det_.edgewiseRois.size());
+    emit detectionCountChanged(det_.gauges.size());
 }
 
 void Worker::handleCalibrationClick(int x, int y) {
     // Hit-test markers on all gauges and start drag if a marker was hit
-    for (size_t i = 0; i < circularGauges_.size(); i++) {
-        int hit = circularGauges_[i]->HandleClick(x, y);
+    for (size_t i = 0; i < gauges_.size(); i++) {
+        int hit = gauges_[i]->HandleClick(x, y);
         if (hit != Gauge::kMarkerNone) {
             cal_.draggingGaugeIdx = static_cast<int>(i);
             cal_.draggingMarker = hit;
@@ -284,9 +262,9 @@ void Worker::publishCalibrationDisplay() {
         disp = firstFrame_.clone();
     }
 
-    drawAllGauges(disp, circularGauges_);
+    drawAllGauges(disp, gauges_);
 
-    for (const auto& d : circularGauges_)
+    for (const auto& d : gauges_)
         d->DrawCalibrationOverlay(disp);
 
     emit frameReady(matToQImage(disp));
@@ -297,9 +275,9 @@ void Worker::publishCalibrationDisplay() {
 // ═══════════════════════════════════════════════════════════════════
 
 void Worker::refreshCalibData() {
-    calibData_.resize(static_cast<int>(circularGauges_.size()));
+    calibData_.resize(static_cast<int>(gauges_.size()));
     auto out = calibData_.begin();
-    for (const auto& d : circularGauges_) {
+    for (const auto& d : gauges_) {
         out->value = d->smoothedValue();
         out->minValue = d->minValue();
         out->maxValue = d->maxValue();
@@ -311,7 +289,7 @@ void Worker::refreshCalibData() {
 
 void Worker::updateGaugeValues() {
     for (int i = 0; i < calibData_.size(); ++i)
-        calibData_[i].value = circularGauges_[i]->smoothedValue();
+        calibData_[i].value = gauges_[i]->smoothedValue();
     emit liveValuesUpdated(calibData_);
 }
 
@@ -325,51 +303,29 @@ void Worker::enterCalibration() {
 }
 
 void Worker::confirmGauges() {
-    if (mode_ != AppMode::kDetection)
-        return;
-    if (det_.rois.empty() && det_.edgewiseRois.empty())
+    if (mode_ != AppMode::kDetection || det_.gauges.empty())
         return;
 
-    circularGauges_.clear();
-    for (size_t i = 0; i < det_.rois.size(); i++) {
-        const auto& g = det_.rois[i];
-        auto gauge = std::make_unique<CircularGauge>(g.center, g.radius,
-                                                       CircularGauge::NextColor());
-
-        // Use homography from ROI (auto-detected) if available
-        if (!g.H.empty()) {
-            gauge->SetHomography(g.H, g.outSize, g.center, g.ellipse);
-        }
-        // Otherwise use manual homography if one was computed
-        else if (i < det_.homographies.size()) {
-            const auto& hd = det_.homographies[i];
-            gauge->SetHomography(hd.H, hd.outSize, hd.center, hd.ellipseRect);
-        }
-
-        std::cout << "  >> Gauge " << (circularGauges_.size())
-                  << " at (" << g.center.x << ", " << g.center.y
-                  << "), radius=" << g.radius
-                  << (gauge->hasHomography() ? " [homography]" : "") << "\n";
-        circularGauges_.push_back(std::move(gauge));
+    gauges_.clear();
+    for (auto& g : det_.gauges) {
+        std::cout << "  >> Gauge " << gauges_.size()
+                  << " at (" << g->roi().center.x << ", "
+                  << g->roi().center.y << ")"
+                  << (dynamic_cast<CircularGauge*>(g.get()) &&
+                      dynamic_cast<CircularGauge*>(g.get())->hasHomography()
+                          ? " [homography]" : "")
+                  << "\n";
+        gauges_.push_back(std::move(g));
     }
-    for (const auto& r : det_.edgewiseRois) {
-        auto gauge = std::make_unique<EdgewiseGauge>(r, Gauge::NextColor());
-        std::cout << "  >> Edgewise gauge " << (circularGauges_.size())
-                  << " at (" << r.x << ", " << r.y
-                  << "), " << r.width << "x" << r.height << "\n";
-        circularGauges_.push_back(std::move(gauge));
-    }
-    det_.rois.clear();
-    det_.edgewiseRois.clear();
-    det_.homographies.clear();
+    det_.gauges.clear();
     calibFrame_ = firstFrame_.clone();
     enterCalibration();
 }
 
 void Worker::confirmCalib() {
-    if (mode_ != AppMode::kCalibration || circularGauges_.empty()) return;
+    if (mode_ != AppMode::kCalibration || gauges_.empty()) return;
 
-    for (auto& d : circularGauges_) {
+    for (auto& d : gauges_) {
         d->FinalizeCalibration();
         // Log circular-specific scale info
         if (auto* cg = dynamic_cast<CircularGauge*>(d.get())) {
@@ -384,8 +340,8 @@ void Worker::confirmCalib() {
 }
 
 void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
-    if (idx < 0 || idx >= static_cast<int>(circularGauges_.size())) return;
-    auto& d = circularGauges_[idx];
+    if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
+    auto& d = gauges_[idx];
     d->SetCalibrationValues(minVal, maxVal);
     if (mode_ == AppMode::kCalibration)
         publishCalibrationDisplay();
@@ -425,14 +381,14 @@ void Worker::processNextFrame() {
         // Initialize motion features on the first processing frame
         // (skip for gauges that use homography-based rectification)
         if (!motionInitialized_) {
-            for (auto& d : circularGauges_) {
+            for (auto& d : gauges_) {
                 d->InitMotionFeatures(frame);
             }
             motionInitialized_ = true;
         }
 
         int labelY = 60;
-        for (auto& d : circularGauges_) {
+        for (auto& d : gauges_) {
             d->UpdateROI(frame);
             d->DetectNeedle(frame);
             d->DrawOverlay(frame, labelY);
@@ -455,7 +411,7 @@ void Worker::restart() {
     if (mode_ != AppMode::kProcessing) return;
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
         std::cerr << "Warning: Could not reset to frame 0 in restart()\n";
-    for (auto& d : circularGauges_) {
+    for (auto& d : gauges_) {
         d->ResetMotionState();
         d->ResetSmoothing();
     }
@@ -481,10 +437,10 @@ void Worker::onDragMove(int x, int y) {
     if (cal_.draggingMarker == Gauge::kMarkerNone) return;
     if (mode_ != AppMode::kCalibration) return;
     if (cal_.draggingGaugeIdx < 0 ||
-        static_cast<size_t>(cal_.draggingGaugeIdx) >= circularGauges_.size())
+        static_cast<size_t>(cal_.draggingGaugeIdx) >= gauges_.size())
         return;
 
-    auto& d = circularGauges_[static_cast<size_t>(cal_.draggingGaugeIdx)];
+    auto& d = gauges_[static_cast<size_t>(cal_.draggingGaugeIdx)];
     d->MoveMarker(cal_.draggingMarker, cv::Point(x, y));
     publishCalibrationDisplay();
 }

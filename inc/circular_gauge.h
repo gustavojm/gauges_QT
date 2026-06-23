@@ -97,6 +97,12 @@ public:
     // ─── Circular-specific: angle-to-value ────────────────────────
     std::optional<double> AngleToValue(double needleAngle) const;
 
+    // ─── Circular-specific: manual placement ──────────────────────
+    static constexpr int kManualClicks = 5;
+    static const char* manualInstruction(int stage);
+    static std::optional<ROI> FitFromManualEdges(
+        const std::vector<cv::Point>& edges);
+
     // ─── Circular-specific: scale access ──────────────────────────
     const ScaleCalibration& scale() const { return scale_; }
 
