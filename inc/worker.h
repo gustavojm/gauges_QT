@@ -16,7 +16,7 @@
 #include "circular_gauge.h"
 
 struct GaugeCalibData {
-    double value = 0;
+    std::optional<double> value = std::nullopt;
     double minValue = 0;
     double maxValue = 1000;
     uint32_t colorRgb = 0x00FF00;

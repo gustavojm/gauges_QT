@@ -3,6 +3,7 @@
 #include <deque>
 #include <memory>
 #include <opencv2/opencv.hpp>
+#include <optional>
 
 // ─── Shared Types ─────────────────────────────────────────────────
 
@@ -52,9 +53,12 @@ public:
     double maxValue() const { return max_value_; }
 
     // ─── Smoothing ────────────────────────────────────────────────
-    void AddReading(double value);
-    double smoothedValue() const { return smoothed_value_; }
+    void AddReading(std::optional<double> reading);
+    std::optional<double> smoothedValue() const { return smoothed_reading_; }
     void ResetSmoothing();
+
+    // ─── Motion State Reset ───────────────────────────────────────
+    virtual void ResetMotionState();
 
     // ─── State Access ─────────────────────────────────────────────
     int number() const { return number_; }
@@ -67,7 +71,7 @@ public:
     // ─── Pure virtual interface (shape-specific) ──────────────────
     virtual void InitMotionFeatures(const cv::Mat& frame) = 0;
     virtual void UpdateROI(const cv::Mat& frame) = 0;
-    virtual double DetectNeedle(const cv::Mat& frame) = 0;
+    virtual std::optional<double> DetectNeedle(const cv::Mat& frame) = 0;
     virtual void FinalizeCalibration() = 0;
     virtual void DrawOverlay(cv::Mat& frame, int labelY = 60) = 0;
     virtual void DrawCalibrationOverlay(cv::Mat& frame) = 0;
@@ -90,10 +94,10 @@ protected:
     bool calib_values_set_ = false;
 
     // Smoothing
-    std::deque<double> value_history_;
+    std::deque<double> readings_history_;
     size_t smooth_window_ = 5;
-    double value_ = -1;
-    double smoothed_value_ = 0;
+    std::optional<double> last_reading_ = std::nullopt;
+    std::optional<double> smoothed_reading_ = std::nullopt;
 
     // Gauge identification
     int number_ = 0;

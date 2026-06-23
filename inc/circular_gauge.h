@@ -3,6 +3,7 @@
 #include "gauge.h"
 
 #include <QObject>
+#include <optional>
 
 Q_DECLARE_METATYPE(AppMode)
 
@@ -83,7 +84,7 @@ public:
     // ─── Gauge interface overrides ────────────────────────────────
     void InitMotionFeatures(const cv::Mat& frame) override;
     void UpdateROI(const cv::Mat& frame) override;
-    double DetectNeedle(const cv::Mat& frame) override;
+    std::optional<double> DetectNeedle(const cv::Mat& frame) override;
     void FinalizeCalibration() override;
     void SetCalibrationValues(double minVal, double maxVal) override;
     void DrawOverlay(cv::Mat& frame, int labelY = 60) override;
@@ -91,9 +92,10 @@ public:
     void DrawOutline(cv::Mat& img) const override;
     int  HandleClick(int clickX, int clickY) override;
     void MoveMarker(int which, cv::Point click) override;
+    void ResetMotionState() override;
 
     // ─── Circular-specific: angle-to-value ────────────────────────
-    double AngleToValue(double needleAngle) const;
+    std::optional<double> AngleToValue(double needleAngle) const;
 
     // ─── Circular-specific: scale access ──────────────────────────
     const ScaleCalibration& scale() const { return scale_; }

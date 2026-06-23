@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iomanip>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -251,7 +252,7 @@ double CircularGauge::DetectNeedleRadial(const cv::Mat& frame) const {
     return bestAngle;
 }
 
-double CircularGauge::DetectNeedle(const cv::Mat& frame) {
+std::optional<double> CircularGauge::DetectNeedle(const cv::Mat& frame) {
     if (hasHomography_) {
         cv::Mat warped = WarpFrame(frame);
         angle_ = DetectColoredNeedle(warped);
@@ -266,11 +267,11 @@ double CircularGauge::DetectNeedle(const cv::Mat& frame) {
     }
 
     if (angle_ >= 0) {
-        value_ = AngleToValue(angle_);
-        AddReading(value_);
-        return value_;
+        last_reading_ = AngleToValue(angle_);
+        AddReading(last_reading_);
+        return last_reading_;
     }
-    return -1;
+    return std::nullopt;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -312,8 +313,8 @@ void CircularGauge::SetCalibrationValues(double minVal, double maxVal) {
 //  Angle-to-Value
 // ═══════════════════════════════════════════════════════════════════
 
-double CircularGauge::AngleToValue(double needleAngle) const {
-    if (!scale_.valid || needleAngle < 0) return -1;
+std::optional<double> CircularGauge::AngleToValue(double needleAngle) const {
+    if (!scale_.valid || needleAngle < 0) return std::nullopt;
     auto normalize = [](double a) {
         a = std::fmod(a, 2.0 * kPi);
         return a < 0 ? a + 2.0 * kPi : a;
@@ -337,7 +338,7 @@ double CircularGauge::AngleToValue(double needleAngle) const {
         else if (needle <= end)
             pos = ((needle + 2.0 * kPi) - start) / range;
         else
-            return -1;
+            return std::nullopt;
     }
     pos = std::clamp(pos, 0.0, 1.0);
     return scale_.min_value + pos * (scale_.max_value - scale_.min_value);
@@ -466,7 +467,11 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) {
     DrawGaugeNumber(frame);
 
     std::ostringstream oss;
-    oss << "Value: " << std::fixed << std::setprecision(2) << value_;
+    oss << "Value: ";
+    if (smoothed_reading_.has_value())
+        oss << std::fixed << std::setprecision(2) << *smoothed_reading_;
+    else
+        oss << "---";
     cv::putText(frame, oss.str(), cv::Point(30, labelY),
                 cv::FONT_HERSHEY_SIMPLEX, 1.2, cv::Scalar(0, 255, 255), 3);
 }
@@ -958,6 +963,12 @@ cv::Mat CircularGauge::WarpFrame(const cv::Mat& frame) const {
 // ═══════════════════════════════════════════════════════════════════
 //  Motion Compensation
 // ═══════════════════════════════════════════════════════════════════
+
+void CircularGauge::ResetMotionState() {
+    Gauge::ResetMotionState();
+    if (hasHomography_ && !homographyBase_.empty())
+        homography_ = homographyBase_.clone();
+}
 
 void CircularGauge::InitMotionFeatures(const cv::Mat& frame) {
     roi_ref_ = roi_;

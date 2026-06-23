@@ -8,6 +8,7 @@
 #include <QVector>
 #include <QWidget>
 
+#include <optional>
 #include <vector>
 
 #include "q_collapsible_section.h"
@@ -19,10 +20,12 @@ struct GaugeSectionWidgets {
     QDoubleSpinBox* maxSpin = nullptr;
 };
 
-inline QString gaugeTitle(int index, double value) {
-    return QString("Gauge %1: %2")
-        .arg(index + 1)
-        .arg(value, 0, 'f', 2);
+inline QString gaugeTitle(int index, const std::optional<double>& value) {
+    if (value.has_value())
+        return QString("Gauge %1: %2")
+            .arg(index + 1)
+            .arg(*value, 0, 'f', 2);
+    return QString("Gauge %1: ---").arg(index + 1);
 }
 
 template<typename Page>

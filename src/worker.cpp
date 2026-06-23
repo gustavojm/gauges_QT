@@ -409,7 +409,10 @@ void Worker::restart() {
     if (mode_ != AppMode::kProcessing) return;
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
         std::cerr << "Warning: Could not reset to frame 0 in restart()\n";
-    for (auto& d : circularGauges_) d->ResetSmoothing();
+    for (auto& d : circularGauges_) {
+        d->ResetMotionState();
+        d->ResetSmoothing();
+    }
     frameCount_ = 0;
     motionInitialized_ = false;
     chainTimer_.start(0, this);

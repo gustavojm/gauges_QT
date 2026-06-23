@@ -53,23 +53,32 @@ void Gauge::SetCalibrationValues(double minVal, double maxVal) {
 //  Smoothing
 // ═══════════════════════════════════════════════════════════════════
 
-void Gauge::AddReading(double value) {
-    if (value >= 0) {
-        value_history_.push_back(value);
-        if (value_history_.size() > smooth_window_) value_history_.pop_front();
+void Gauge::AddReading(std::optional<double> reading) {
+    if (reading.has_value()) {
+        readings_history_.push_back(*reading);
+        if (readings_history_.size() > smooth_window_) readings_history_.pop_front();
+    } else {
+        if (!readings_history_.empty()) {
+            readings_history_.pop_front();
+        }
     }
 
-    smoothed_value_ = value;
-    if (!value_history_.empty()) {
-        smoothed_value_ =
-            std::accumulate(value_history_.begin(), value_history_.end(), 0.0) /
-            value_history_.size();
+    if (!readings_history_.empty()) {
+        smoothed_reading_ =
+            std::accumulate(readings_history_.begin(), readings_history_.end(), 0.0) /
+            readings_history_.size();
+    } else {
+        smoothed_reading_ = std::nullopt;
     }
 }
 
 void Gauge::ResetSmoothing() {
-    value_history_.clear();
-    smoothed_value_ = 0;
+    readings_history_.clear();
+    smoothed_reading_ = std::nullopt;
+}
+
+void Gauge::ResetMotionState() {
+    roi_ = roi_ref_;
 }
 
 // ═══════════════════════════════════════════════════════════════════
