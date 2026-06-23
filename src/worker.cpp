@@ -200,6 +200,9 @@ void Worker::handleDetectionClick(int x, int y) {
             }
             break;
         }
+
+        default:
+            break;
     }
 
     if (created) {
