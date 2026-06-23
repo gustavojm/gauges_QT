@@ -24,6 +24,9 @@ public:
 signals:
     void quitRequested();
 
+public slots:
+    void setStatus(const QString& message);
+
 protected:
     void closeEvent(QCloseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;

@@ -7,6 +7,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QStatusBar>
 #include <QThread>
 #include <QVBoxLayout>
 
@@ -42,6 +43,8 @@ MainWindow::MainWindow(const std::string& videoPath)
     // ── Central widget ──────────────────────────────────────────
     auto* central = new QWidget(this);
     setCentralWidget(central);
+
+    statusBar()->showMessage("Ready");
 
     auto* mainLayout = new QHBoxLayout(central);
     mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -142,4 +145,20 @@ void MainWindow::setMode(AppMode mode) {
     detectionPage_->setVisible(mode == AppMode::kDetection);
     calibrationPage_->setVisible(mode == AppMode::kCalibration);
     processingPage_->setVisible(mode == AppMode::kProcessing);
+
+    switch (mode) {
+        case AppMode::kDetection:
+            statusBar()->showMessage("Detection mode");
+            break;
+        case AppMode::kCalibration:
+            statusBar()->showMessage("Calibration mode");
+            break;
+        case AppMode::kProcessing:
+            statusBar()->showMessage("Processing mode");
+            break;
+    }
+}
+
+void MainWindow::setStatus(const QString& message) {
+    statusBar()->showMessage(message);
 }
