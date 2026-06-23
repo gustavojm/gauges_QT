@@ -4,6 +4,9 @@
 #include <QCloseEvent>
 #include <QHBoxLayout>
 #include <QKeyEvent>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMessageBox>
 #include <QThread>
 #include <QVBoxLayout>
 
@@ -20,7 +23,27 @@ MainWindow::MainWindow(const std::string& videoPath)
                   "QLabel { color: #d0d0d0; }"
                   "QCheckBox { color: #d0d0d0; }");
 
-    auto* mainLayout = new QHBoxLayout(this);
+    // ── Menu bar ────────────────────────────────────────────────
+    auto* fileMenu = menuBar()->addMenu("&File");
+    fileMenu->addSeparator();
+    auto* exitAction = fileMenu->addAction("E&xit");
+    connect(exitAction, &QAction::triggered, this, [this]() {
+        close();
+    });
+
+    auto* helpMenu = menuBar()->addMenu("&Help");
+    auto* aboutAction = helpMenu->addAction("&About");
+    connect(aboutAction, &QAction::triggered, this, [this]() {
+        QMessageBox::about(this, "About Gauge Reader",
+            "Gauge Reader\n\n"
+            "A tool for reading circular and edgewise gauges from video.");
+    });
+
+    // ── Central widget ──────────────────────────────────────────
+    auto* central = new QWidget(this);
+    setCentralWidget(central);
+
+    auto* mainLayout = new QHBoxLayout(central);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
@@ -111,7 +134,7 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
         if (workerThread_ && workerThread_->isRunning())
             emit quitRequested();
     }
-    QWidget::keyPressEvent(event);
+    QMainWindow::keyPressEvent(event);
 }
 
 void MainWindow::setMode(AppMode mode) {

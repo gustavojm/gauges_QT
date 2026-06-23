@@ -2,7 +2,7 @@
 
 #include <QCloseEvent>
 #include <QKeyEvent>
-#include <QWidget>
+#include <QMainWindow>
 
 #include <string>
 
@@ -13,7 +13,7 @@
 #include "calibration_page.h"
 #include "processing_page.h"
 
-class MainWindow : public QWidget {
+class MainWindow : public QMainWindow {
     Q_OBJECT
     Q_DISABLE_COPY_MOVE(MainWindow)
 
