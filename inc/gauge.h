@@ -45,6 +45,9 @@ public:
     Gauge(const cv::Point& center, int radius, const cv::Scalar& color);
     virtual ~Gauge() = default;
 
+    bool isManual() const { return isManual_; }
+    void setManual(bool manual) { isManual_ = manual; }
+
     // ─── Static: Color palette ────────────────────────────────────
     static cv::Scalar NextColor();
 
@@ -103,6 +106,7 @@ protected:
     // Gauge identification
     int number_ = 0;
     static int next_number_;
+    bool isManual_ = false;
 
     // Motion compensation state
     cv::Mat ref_gray_;

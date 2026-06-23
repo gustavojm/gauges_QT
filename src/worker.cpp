@@ -84,7 +84,7 @@ void Worker::start() {
         std::cerr << "Warning: Could not reset to frame 0 in start()\n";
 
     det_.gauges.clear();
-    for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, det_.acc)) {
+        for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, 40)) {
         auto g = std::make_unique<CircularGauge>(roi.center, roi.radius,
                                                    Gauge::NextColor());
         if (!roi.H.empty())
@@ -112,9 +112,21 @@ void Worker::displayDetectionOverlay() {
 }
 
 void Worker::reRunDetection() {
+    std::vector<std::unique_ptr<Gauge>> preserved;
+    for (auto& g : det_.gauges) {
+        if (g->isManual()) {
+            preserved.push_back(std::move(g));
+        } else if ((det_.activeType == GaugeType::kCircular &&
+                    !dynamic_cast<CircularGauge*>(g.get())) ||
+                   (det_.activeType == GaugeType::kEdgewise &&
+                    !dynamic_cast<EdgewiseGauge*>(g.get()))) {
+            preserved.push_back(std::move(g));
+        }
+    }
     det_.gauges.clear();
+
     if (det_.activeType == GaugeType::kCircular) {
-        for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, det_.acc)) {
+        for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, 40)) {
             auto g = std::make_unique<CircularGauge>(roi.center, roi.radius,
                                                        Gauge::NextColor());
             if (!roi.H.empty())
@@ -126,6 +138,10 @@ void Worker::reRunDetection() {
             det_.gauges.push_back(
                 std::make_unique<EdgewiseGauge>(roi, Gauge::NextColor()));
     }
+
+    for (auto& g : preserved)
+        det_.gauges.push_back(std::move(g));
+
     displayDetectionOverlay();
 }
 
@@ -141,20 +157,13 @@ void Worker::setManualPlacement(bool enabled) {
         det_.manualStage = DetectionState::ManualStage::kEdge1;
         det_.manualEdges.clear();
         emit manualInstructionChanged(0);
-    } else if (mode_ == AppMode::kDetection) {
-        reRunDetection();
     }
     emit manualPlacementActivated(enabled);
+    emit detectionCountChanged(det_.gauges.size());
 }
 
 void Worker::setCanny(int value) {
     det_.canny = value;
-    if (mode_ == AppMode::kDetection && !det_.manualPlacement)
-        reRunDetection();
-}
-
-void Worker::setAcc(int value) {
-    det_.acc = value;
     if (mode_ == AppMode::kDetection && !det_.manualPlacement)
         reRunDetection();
 }
@@ -185,6 +194,7 @@ void Worker::handleDetectionClick(int x, int y) {
             if (roi) {
                 det_.gauges.push_back(
                     std::make_unique<EdgewiseGauge>(*roi, Gauge::NextColor()));
+                det_.gauges.back()->setManual(true);
                 created = true;
             }
             break;
@@ -195,6 +205,7 @@ void Worker::handleDetectionClick(int x, int y) {
                 auto g = std::make_unique<CircularGauge>(
                     roi->center, roi->radius, Gauge::NextColor());
                 g->SetHomography(roi->H, roi->outSize, roi->center, roi->ellipse);
+                g->setManual(true);
                 det_.gauges.push_back(std::move(g));
                 created = true;
             }

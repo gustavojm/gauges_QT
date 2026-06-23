@@ -30,7 +30,6 @@ struct DetectionState {
     GaugeType activeType = GaugeType::kCircular;
     bool manualPlacement = false;
     int canny = 320;
-    int acc = 40;
 
     enum class ManualStage { kEdge1, kEdge2, kEdge3, kEdge4, kEdge5 };
     ManualStage manualStage = ManualStage::kEdge1;
@@ -68,7 +67,6 @@ public slots:
     void setManualPlacement(bool enabled);
     void setGaugeType(int typeIndex);
     void setCanny(int value);
-    void setAcc(int value);
     void confirmGauges();
     void confirmCalib();
     void setGaugeCalibRange(int idx, double minVal, double maxVal);

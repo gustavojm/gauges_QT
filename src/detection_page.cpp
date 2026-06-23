@@ -1,7 +1,6 @@
 #include "detection_page.h"
 #include "worker.h"
 
-#include <QCheckBox>
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -23,11 +22,6 @@ DetectionPage::DetectionPage(QWidget* parent)
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(10);
 
-    manualCb_ = new QCheckBox("Click to place gauges manually", this);
-    connect(manualCb_, &QCheckBox::toggled,
-            this, &DetectionPage::manualPlacementToggled);
-    lay->addWidget(manualCb_);
-
     auto* typeRow = new QWidget(this);
     auto* thl = new QHBoxLayout(typeRow);
     thl->setContentsMargins(0, 0, 0, 0);
@@ -41,7 +35,7 @@ DetectionPage::DetectionPage(QWidget* parent)
             this, [this](int index) {
                 isEdgewise_ = (index == 1);
                 emit gaugeTypeChanged(index);
-                if (manualCb_->isChecked())
+                if (manualBtn_->isChecked())
                     onManualInstructionChanged(0);
             });
     lay->addWidget(typeRow);
@@ -61,29 +55,23 @@ DetectionPage::DetectionPage(QWidget* parent)
             this, &DetectionPage::cannyChanged);
     lay->addWidget(cannyRow_);
 
-    accRow_ = new QWidget(this);
-    auto* ahl = new QHBoxLayout(accRow_);
-    ahl->setContentsMargins(0, 0, 0, 0);
-    ahl->addWidget(new QLabel("Accum:", this));
-    accSlider_ = new QSlider(Qt::Horizontal, this);
-    accSlider_->setRange(1, 500);
-    accSlider_->setValue(40);
-    accValLabel_ = new QLabel("40", this);
-    accValLabel_->setFixedWidth(30);
-    ahl->addWidget(accSlider_, 1);
-    ahl->addWidget(accValLabel_);
-    connect(accSlider_, &QSlider::valueChanged,
-            this, &DetectionPage::accChanged);
-    lay->addWidget(accRow_);
-
-    gaugeCountLabel_ = new QLabel("Found 0 gauge(s)", this);
-    lay->addWidget(gaugeCountLabel_);
+    manualBtn_ = new QPushButton("Add Gauges Manually", this);
+    manualBtn_->setCheckable(true);
+    manualBtn_->setToolTip("Toggle between automatic and manual gauge placement");
+    connect(manualBtn_, &QPushButton::toggled, this, [this](bool checked) {
+        manualBtn_->setText(checked ? "Automatic Detection" : "Add Gauges Manually");
+        emit manualPlacementToggled(checked);
+    });
+    lay->addWidget(manualBtn_);
 
     instructionLabel_ = new QLabel(this);
     instructionLabel_->setWordWrap(true);
     instructionLabel_->setStyleSheet("color: #ffff00; font-weight: bold;");
     instructionLabel_->setVisible(false);
     lay->addWidget(instructionLabel_);
+
+    gaugeCountLabel_ = new QLabel("Found 0 gauge(s)", this);
+    lay->addWidget(gaugeCountLabel_);
 
     lay->addSpacing(8);
 
@@ -108,7 +96,6 @@ void DetectionPage::onDetectionCountChanged(int numGauges) {
 
 void DetectionPage::onManualPlacementActivated(bool active) {
     cannyRow_->setVisible(!active);
-    accRow_->setVisible(!active);
     instructionLabel_->setVisible(active);
     if (!active) instructionLabel_->clear();
 }
@@ -127,8 +114,6 @@ void DetectionPage::connectToWorker(Worker* worker) {
             worker, &Worker::setGaugeType);
     connect(this, &DetectionPage::cannyChanged,
             worker, &Worker::setCanny);
-    connect(this, &DetectionPage::accChanged,
-            worker, &Worker::setAcc);
     connect(this, &DetectionPage::confirmClicked,
             worker, &Worker::confirmGauges);
     connect(worker, &Worker::detectionCountChanged,
