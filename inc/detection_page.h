@@ -3,6 +3,7 @@
 #include <QWidget>
 
 class QCheckBox;
+class QComboBox;
 class QSlider;
 class QLabel;
 class QPushButton;
@@ -22,12 +23,14 @@ public slots:
 
 signals:
     void manualPlacementToggled(bool checked);
+    void gaugeTypeChanged(int typeIndex);
     void cannyChanged(int value);
     void accChanged(int value);
     void confirmClicked();
 
 private:
     QCheckBox* manualCb_ = nullptr;
+    QComboBox* gaugeTypeCombo_ = nullptr;
     QWidget* cannyRow_ = nullptr;
     QSlider* cannySlider_ = nullptr;
     QLabel* cannyValLabel_ = nullptr;

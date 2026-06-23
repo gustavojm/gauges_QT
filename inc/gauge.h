@@ -8,6 +8,7 @@
 // ─── Shared Types ─────────────────────────────────────────────────
 
 enum class AppMode { kDetection, kCalibration, kProcessing };
+enum class GaugeType { kCircular, kEdgewise };
 
 // ─── Named constants ─────────────────────────────────────────────
 

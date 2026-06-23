@@ -84,6 +84,7 @@ void Worker::start() {
         std::cerr << "Warning: Could not reset to frame 0 in start()\n";
 
     det_.rois = CircularGauge::FindGauges(firstFrame_, det_.canny, det_.acc);
+    det_.edgewiseRois = EdgewiseGauge::FindGauges(firstFrame_, det_.canny);
     displayDetectionOverlay();
     emit modeChanged(AppMode::kDetection);
 }
@@ -105,13 +106,30 @@ void Worker::displayDetectionOverlay() {
                     roi.center + cv::Point(-20, 5),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1);
     }
+    for (const auto& r : det_.edgewiseRois) {
+        cv::rectangle(disp, r, color, 2);
+        cv::Point center(r.x + r.width / 2, r.y + r.height / 2);
+        cv::putText(disp, std::to_string(r.width),
+                    center + cv::Point(-20, 5),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1);
+    }
     emit frameReady(matToQImage(disp));
-    emit detectionCountChanged(det_.rois.size());
+    emit detectionCountChanged(det_.rois.size() + det_.edgewiseRois.size());
 }
 
 void Worker::reRunDetection() {
-    det_.rois = CircularGauge::FindGauges(firstFrame_, det_.canny, det_.acc);
+    if (det_.activeType == GaugeType::kCircular) {
+        det_.rois = CircularGauge::FindGauges(firstFrame_, det_.canny, det_.acc);
+    } else {
+        det_.edgewiseRois = EdgewiseGauge::FindGauges(firstFrame_, det_.canny);
+    }
     displayDetectionOverlay();
+}
+
+void Worker::setGaugeType(int typeIndex) {
+    det_.activeType = static_cast<GaugeType>(typeIndex);
+    if (mode_ == AppMode::kDetection && !det_.manualPlacement)
+        reRunDetection();
 }
 
 void Worker::setManualPlacement(bool enabled) {
@@ -157,29 +175,40 @@ void Worker::handleDetectionClick(int x, int y) {
     det_.manualEdges.push_back(click);
     int n = static_cast<int>(det_.manualEdges.size());
 
-    if (n < 5) {
+    int requiredClicks = (det_.activeType == GaugeType::kEdgewise) ? 4 : 5;
+
+    if (n < requiredClicks) {
         emit manualInstructionChanged(n);
     } else {
-        // All 5 perimeter points collected — fit ellipse and compute homography
-        cv::Mat H;
-        cv::Size outSize;
-        cv::RotatedRect ellipseRect;
-        cv::Point inferredCenter;
-        if (CircularGauge::ComputeHomography(det_.manualEdges, H, outSize,
-                                             ellipseRect, inferredCenter)) {
-            int r = cvRound(std::min(outSize.width, outSize.height) * 0.5);
-            det_.rois.push_back({inferredCenter, r});
-            det_.homographies.push_back(
-                {H, outSize, inferredCenter, ellipseRect});
-
-            std::cout << "  >> Manual gauge at ("
-                      << inferredCenter.x << ", "
-                      << inferredCenter.y
-                      << "), warped to " << outSize.width << "x"
-                      << outSize.height << "\n";
+        if (det_.activeType == GaugeType::kEdgewise) {
+            // 4 corner clicks → compute bounding rect
+            cv::Rect bbox = cv::boundingRect(det_.manualEdges);
+            det_.edgewiseRois.push_back(bbox);
+            std::cout << "  >> Manual edgewise gauge at ("
+                      << bbox.x << ", " << bbox.y
+                      << "), " << bbox.width << "x" << bbox.height << "\n";
         } else {
-            std::cerr << "  >> Ellipse fit failed — points may be "
-                         "collinear or not form an ellipse.\n";
+            // All 5 perimeter points collected — fit ellipse and compute homography
+            cv::Mat H;
+            cv::Size outSize;
+            cv::RotatedRect ellipseRect;
+            cv::Point inferredCenter;
+            if (CircularGauge::ComputeHomography(det_.manualEdges, H, outSize,
+                                                 ellipseRect, inferredCenter)) {
+                int r = cvRound(std::min(outSize.width, outSize.height) * 0.5);
+                det_.rois.push_back({inferredCenter, r});
+                det_.homographies.push_back(
+                    {H, outSize, inferredCenter, ellipseRect});
+
+                std::cout << "  >> Manual gauge at ("
+                          << inferredCenter.x << ", "
+                          << inferredCenter.y
+                          << "), warped to " << outSize.width << "x"
+                          << outSize.height << "\n";
+            } else {
+                std::cerr << "  >> Ellipse fit failed — points may be "
+                             "collinear or not form an ellipse.\n";
+            }
         }
 
         det_.manualEdges.clear();
@@ -203,6 +232,13 @@ void Worker::handleDetectionClick(int x, int y) {
                     g.center - cv::Point(8, 8),
                     cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
     }
+    for (const auto& r : det_.edgewiseRois) {
+        cv::rectangle(disp, r, cv::Scalar(0, 255, 0), 2);
+        cv::Point center(r.x + r.width / 2, r.y + r.height / 2);
+        cv::putText(disp, std::to_string(label++),
+                    center - cv::Point(8, 8),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
+    }
 
     // Draw placed edge points and lines between them
     for (size_t i = 0; i < det_.manualEdges.size(); i++) {
@@ -220,7 +256,7 @@ void Worker::handleDetectionClick(int x, int y) {
     }
 
     emit frameReady(matToQImage(disp));
-    emit detectionCountChanged(det_.rois.size());
+    emit detectionCountChanged(det_.rois.size() + det_.edgewiseRois.size());
 }
 
 void Worker::handleCalibrationClick(int x, int y) {
@@ -289,14 +325,16 @@ void Worker::enterCalibration() {
 }
 
 void Worker::confirmGauges() {
-    if (mode_ != AppMode::kDetection || det_.rois.empty())
+    if (mode_ != AppMode::kDetection)
+        return;
+    if (det_.rois.empty() && det_.edgewiseRois.empty())
         return;
 
     circularGauges_.clear();
     for (size_t i = 0; i < det_.rois.size(); i++) {
         const auto& g = det_.rois[i];
         auto gauge = std::make_unique<CircularGauge>(g.center, g.radius,
-                                                      CircularGauge::NextColor());
+                                                       CircularGauge::NextColor());
 
         // Use homography from ROI (auto-detected) if available
         if (!g.H.empty()) {
@@ -314,7 +352,15 @@ void Worker::confirmGauges() {
                   << (gauge->hasHomography() ? " [homography]" : "") << "\n";
         circularGauges_.push_back(std::move(gauge));
     }
+    for (const auto& r : det_.edgewiseRois) {
+        auto gauge = std::make_unique<EdgewiseGauge>(r, Gauge::NextColor());
+        std::cout << "  >> Edgewise gauge " << (circularGauges_.size())
+                  << " at (" << r.x << ", " << r.y
+                  << "), " << r.width << "x" << r.height << "\n";
+        circularGauges_.push_back(std::move(gauge));
+    }
     det_.rois.clear();
+    det_.edgewiseRois.clear();
     det_.homographies.clear();
     calibFrame_ = firstFrame_.clone();
     enterCalibration();

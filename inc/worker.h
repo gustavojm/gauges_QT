@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "circular_gauge.h"
+#include "edgewise_gauge.h"
 
 struct GaugeCalibData {
     std::optional<double> value = std::nullopt;
@@ -26,6 +27,8 @@ Q_DECLARE_METATYPE(GaugeCalibData)
 
 struct DetectionState {
     std::vector<CircularGauge::ROI> rois;
+    std::vector<cv::Rect> edgewiseRois;
+    GaugeType activeType = GaugeType::kCircular;
     bool manualPlacement = false;
     int canny = 320;
     int acc = 40;
@@ -67,12 +70,14 @@ signals:
     void modeChanged(AppMode mode);
     void manualPlacementActivated(bool active);
     void manualInstructionChanged(int stage);
+    void gaugeTypeChanged(int typeIndex);
     void finished();
 
 public slots:
     void start();
     void onImageClicked(int x, int y);
     void setManualPlacement(bool enabled);
+    void setGaugeType(int typeIndex);
     void setCanny(int value);
     void setAcc(int value);
     void confirmGauges();

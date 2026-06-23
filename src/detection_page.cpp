@@ -2,6 +2,7 @@
 #include "worker.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
@@ -23,6 +24,19 @@ DetectionPage::DetectionPage(QWidget* parent)
     connect(manualCb_, &QCheckBox::toggled,
             this, &DetectionPage::manualPlacementToggled);
     lay->addWidget(manualCb_);
+
+    auto* typeRow = new QWidget(this);
+    auto* thl = new QHBoxLayout(typeRow);
+    thl->setContentsMargins(0, 0, 0, 0);
+    thl->addWidget(new QLabel("Gauge type:", this));
+    gaugeTypeCombo_ = new QComboBox(this);
+    gaugeTypeCombo_->addItem("Circular Gauge");
+    gaugeTypeCombo_->addItem("Edgewise Panel Meter");
+    gaugeTypeCombo_->setCurrentIndex(0);
+    thl->addWidget(gaugeTypeCombo_, 1);
+    connect(gaugeTypeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &DetectionPage::gaugeTypeChanged);
+    lay->addWidget(typeRow);
 
     cannyRow_ = new QWidget(this);
     auto* chl = new QHBoxLayout(cannyRow_);
@@ -119,6 +133,8 @@ void DetectionPage::onManualInstructionChanged(int stage) {
 void DetectionPage::connectToWorker(Worker* worker) {
     connect(this, &DetectionPage::manualPlacementToggled,
             worker, &Worker::setManualPlacement);
+    connect(this, &DetectionPage::gaugeTypeChanged,
+            worker, &Worker::setGaugeType);
     connect(this, &DetectionPage::cannyChanged,
             worker, &Worker::setCanny);
     connect(this, &DetectionPage::accChanged,
