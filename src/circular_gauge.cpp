@@ -18,7 +18,7 @@ std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
     cv::Mat gray;
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
-    int maxDim = std::max(gray.rows, gray.cols);
+    int maxDim = (std::max)(gray.rows, gray.cols);
     double minArea = static_cast<double>(maxDim * maxDim) /
                      (kMinRadiusDivisor * kMinRadiusDivisor) * kPi;
     double maxArea = static_cast<double>(maxDim * maxDim) /
@@ -60,8 +60,8 @@ std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
         if (a < 1.0f || b < 1.0f) continue;
 
         // Reject very elongated ellipses (aspect ratio > 3:1)
-        float major = std::max(a, b);
-        float minor = std::min(a, b);
+        float major = (std::max)(a, b);
+        float minor = (std::min)(a, b);
         if (major / minor > 3.0f) continue;
 
         double area = cv::contourArea(cnt);
@@ -161,7 +161,7 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
             roi_.radius * kMaxCentroidDistFactor) continue;
         double maxDist = 0;
         for (const auto& pt : contours[i])
-            maxDist = std::max(maxDist, cv::norm(pt - center));
+            maxDist = (std::max)(maxDist, cv::norm(pt - center));
         double score = maxDist * std::log(area + 1);
         if (score > bestScore) {
             bestScore = score;
@@ -355,7 +355,7 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) {
             // projected back into the original frame via inverse homography
             cv::Mat Hinv;
             cv::invert(homography_, Hinv);
-            int side = std::min(warpSize_.width, warpSize_.height);
+            int side = (std::min)(warpSize_.width, warpSize_.height);
             int drawR = side / 2;
             // Draw ~20 points around the rectified circle, warped back
             std::vector<cv::Point2f> circlePts;
@@ -613,7 +613,7 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) {
 // ═══════════════════════════════════════════════════════════════════
 
 int CircularGauge::HandleClick(int clickX, int clickY) {
-    int thresh = std::max(roi_.radius / 6, static_cast<int>(kHitTestMinThresh));
+    int thresh = (std::max)(roi_.radius / 6, static_cast<int>(kHitTestMinThresh));
     cv::Point click(clickX, clickY);
 
     cv::Point ptMinTarget, ptMaxTarget;
@@ -782,7 +782,7 @@ bool CircularGauge::ComputeHomography(const std::vector<cv::Point>& pts,
     // Eigendecomposition of M
     double trace = M00 + M11;
     double detM = M00 * M11 - M01 * M01;
-    double disc = std::sqrt(std::max(0.0, trace * trace * 0.25 - detM));
+    double disc = std::sqrt((std::max)(0.0, trace * trace * 0.25 - detM));
     double lamBig = trace * 0.5 + disc;
     double lamSmall = trace * 0.5 - disc;
     if (lamSmall < 1e-15) return false;
@@ -863,7 +863,7 @@ bool CircularGauge::HomographyFromEllipse(const cv::RotatedRect& rr,
 
     double trace = M00 + M11;
     double detM = M00 * M11 - M01 * M01;
-    double disc = std::sqrt(std::max(0.0, trace * trace * 0.25 - detM));
+    double disc = std::sqrt((std::max)(0.0, trace * trace * 0.25 - detM));
     double lamBig = trace * 0.5 + disc;
     double lamSmall = trace * 0.5 - disc;
     if (lamSmall < 1e-15) return false;
@@ -920,7 +920,7 @@ void CircularGauge::SetHomography(const cv::Mat& H, const cv::Size& outSize,
     hasHomography_ = true;
 
     roi_.center = center;
-    roi_.radius = cvRound(std::min(outSize.width, outSize.height) * 0.5);
+    roi_.radius = cvRound((std::min)(outSize.width, outSize.height) * 0.5);
 
     // Remap initial pt_min_/pt_max_ from the circle onto the ellipse:
     // map them to rectified space (they'll land on the circle), then
@@ -1145,7 +1145,7 @@ std::optional<CircularGauge::ROI> CircularGauge::FitFromManualEdges(
     cv::Point inferredCenter;
     if (ComputeHomography(edges, H, outSize, ellipseRect, inferredCenter)) {
         result.center = inferredCenter;
-        result.radius = cvRound(std::min(outSize.width, outSize.height) * 0.5);
+        result.radius = cvRound((std::min)(outSize.width, outSize.height) * 0.5);
         result.ellipse = ellipseRect;
         result.hasEllipse = true;
         result.H = H;
