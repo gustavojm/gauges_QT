@@ -4,10 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iomanip>
 #include <numeric>
 #include <optional>
-#include <sstream>
 #include <string>
 
 // ═══════════════════════════════════════════════════════════════════
@@ -353,7 +351,8 @@ std::optional<double> CircularGauge::AngleToValue(double needleAngle) const {
 void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
     cv::Mat Hinv;
     if (hasHomography_) {
-        cv::invert(homography_, Hinv);
+        if (cv::invert(homography_, Hinv) == 0)
+            return;
     }
 
     if (roi_.radius > 0) {
@@ -467,14 +466,7 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
 
     DrawGaugeNumber(frame);
 
-    std::ostringstream oss;
-    oss << "Value: ";
-    if (smoothed_reading_.has_value())
-        oss << std::fixed << std::setprecision(2) << *smoothed_reading_;
-    else
-        oss << "---";
-    cv::putText(frame, oss.str(), cv::Point(30, labelY),
-                cv::FONT_HERSHEY_SIMPLEX, 1.2, cv::Scalar(0, 255, 255), 3);
+    DrawValueText(frame, labelY);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -522,7 +514,8 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) {
                 rectCenter_.y + arcR * static_cast<float>(std::sin(t)));
         }
         cv::Mat Hinv;
-        cv::invert(homography_, Hinv);
+        if (cv::invert(homography_, Hinv) == 0)
+            return;
         cv::perspectiveTransform(arcSrc, arcDst, Hinv);
 
         for (size_t i = 0; i + 1 < arcDst.size(); i++) {
@@ -635,13 +628,17 @@ int CircularGauge::HandleClick(int clickX, int clickY) {
                                   rectCenter_.y + dy * kRadiusInset);
         }
         cv::Mat Hinv;
-        cv::invert(homography_, Hinv);
-        std::vector<cv::Point2f> ptsOriginal;
-        cv::perspectiveTransform(ptsInset, ptsOriginal, Hinv);
-        ptMinTarget = cv::Point(cvRound(ptsOriginal[0].x),
-                                cvRound(ptsOriginal[0].y));
-        ptMaxTarget = cv::Point(cvRound(ptsOriginal[1].x),
-                                cvRound(ptsOriginal[1].y));
+        if (cv::invert(homography_, Hinv) == 0) {
+            ptMinTarget = pt_min_;
+            ptMaxTarget = pt_max_;
+        } else {
+            std::vector<cv::Point2f> ptsOriginal;
+            cv::perspectiveTransform(ptsInset, ptsOriginal, Hinv);
+            ptMinTarget = cv::Point(cvRound(ptsOriginal[0].x),
+                                    cvRound(ptsOriginal[0].y));
+            ptMaxTarget = cv::Point(cvRound(ptsOriginal[1].x),
+                                    cvRound(ptsOriginal[1].y));
+        }
     } else {
         cv::Point center = roi_.center;
         cv::Point vecMin = pt_min_ - center;
@@ -714,7 +711,8 @@ void CircularGauge::MoveMarker(int which, cv::Point click) {
                                rectCenter_.y + dy * scale);
 
         cv::Mat Hinv;
-        cv::invert(homography_, Hinv);
+        if (cv::invert(homography_, Hinv) == 0)
+            return;
         std::vector<cv::Point2f> src2 = {markerRect};
         std::vector<cv::Point2f> dst2;
         cv::perspectiveTransform(src2, dst2, Hinv);
@@ -889,7 +887,8 @@ void CircularGauge::SetHomography(const cv::Mat& H, const cv::Size& outSize,
         cv::Point2f markerRect(rectCenter_.x + dx * scale,
                                rectCenter_.y + dy * scale);
         cv::Mat Hinv;
-        cv::invert(homography_, Hinv);
+        if (cv::invert(homography_, Hinv) == 0)
+            return;
         std::vector<cv::Point2f> src2 = {markerRect};
         std::vector<cv::Point2f> dst2;
         cv::perspectiveTransform(src2, dst2, Hinv);

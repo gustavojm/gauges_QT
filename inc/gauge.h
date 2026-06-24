@@ -89,6 +89,7 @@ public:
 
     // ─── Drawing (generic) ────────────────────────────────────────
     void DrawGaugeNumber(cv::Mat& img) const;
+    void DrawValueText(cv::Mat& frame, int labelY) const;
 
     // ─── Pure virtual interface (shape-specific) ──────────────────
     virtual void InitMotionFeatures(const cv::Mat& frame) = 0;

@@ -1,4 +1,5 @@
 #include "detection_page.h"
+#include "gauge.h"
 #include "worker.h"
 
 #include <QComboBox>
@@ -33,8 +34,8 @@ DetectionPage::DetectionPage(QWidget* parent)
     thl->addWidget(gaugeTypeCombo_, 1);
     connect(gaugeTypeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int index) {
-                isEdgewise_ = (index == 1);
-                emit gaugeTypeChanged(index);
+                type_ = (index == 0 ? GaugeType::kCircular : GaugeType::kEdgewise);
+                emit gaugeTypeChanged(type_);
                 if (manualBtn_->isChecked())
                     onManualInstructionChanged(0);
             });
@@ -101,9 +102,17 @@ void DetectionPage::onManualPlacementActivated(bool active) {
 }
 
 void DetectionPage::onManualInstructionChanged(int stage) {
-    const char* text = isEdgewise_
-        ? EdgewiseGauge::manualInstruction(stage)
-        : CircularGauge::manualInstruction(stage);
+    const char* text; 
+        switch (type_) {
+            case GaugeType::kEdgewise:
+            text = EdgewiseGauge::manualInstruction(stage);
+            break;
+        
+            case GaugeType::kCircular:
+            text = EdgewiseGauge::manualInstruction(stage);
+            break;
+        }
+    
     instructionLabel_->setText(QString::fromUtf8(text));
 }
 

@@ -1,7 +1,9 @@
 #include "gauge.h"
 
 #include <algorithm>
+#include <iomanip>
 #include <numeric>
+#include <sstream>
 
 int Gauge::next_number_ = 1;
 
@@ -99,4 +101,15 @@ void Gauge::DrawGaugeNumber(cv::Mat& img) const {
     cv::putText(img, std::to_string(number_),
                 roi_.center - cv::Point(8, 8),
                 cv::FONT_HERSHEY_SIMPLEX, 0.8, color_, 2);
+}
+
+void Gauge::DrawValueText(cv::Mat& frame, int labelY) const {
+    std::ostringstream oss;
+    oss << "Value: ";
+    if (smoothed_reading_.has_value())
+        oss << std::fixed << std::setprecision(2) << *smoothed_reading_;
+    else
+        oss << "---";
+    cv::putText(frame, oss.str(), cv::Point(30, labelY),
+                cv::FONT_HERSHEY_SIMPLEX, 1.2, cv::Scalar(0, 255, 255), 3);
 }

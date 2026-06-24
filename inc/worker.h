@@ -16,6 +16,7 @@
 
 #include "circular_gauge.h"
 #include "edgewise_gauge.h"
+#include "gauge.h"
 
 struct GaugeCalibData {
     std::optional<double> value = std::nullopt;
@@ -69,7 +70,7 @@ public slots:
     void start();
     void onImageClicked(int x, int y);
     void setManualPlacement(bool enabled);
-    void setGaugeType(int typeIndex);
+    void setGaugeType(GaugeType type);
     void setCanny(int value);
     void confirmGauges();
     void confirmCalib();
@@ -83,7 +84,7 @@ public slots:
     void restart();
     void quit();
 
-    const QVector<GaugeCalibData>& calibData() const { return calibData_; }
+    QVector<GaugeCalibData> calibData() const { return calibData_; }
 
 private:
     void timerEvent(QTimerEvent* event) override;
@@ -95,6 +96,7 @@ private:
 
     static QImage matToQImage(const cv::Mat& bgr);
     void displayDetectionOverlay();
+    void detectGauges(bool onlyActiveType = false);
     void reRunDetection();
     void publishCalibrationDisplay();
     void enterCalibration();

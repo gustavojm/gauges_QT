@@ -4,9 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iomanip>
 #include <numeric>
-#include <sstream>
+#include <optional>
 
 // ═══════════════════════════════════════════════════════════════════
 //  Construction
@@ -476,43 +475,31 @@ void EdgewiseGauge::DrawCalibrationOverlay(cv::Mat& frame) {
     cv::Scalar green(0, 255, 0);
     cv::Scalar red(0, 0, 255);
 
+    auto drawMarker = [&](cv::Point pt, const cv::Scalar& color, const char* label) {
+        cv::circle(frame, pt, kEdgewiseMarkerRadius, color, -1);
+        cv::circle(frame, pt, kEdgewiseMarkerOutlineRadius, color, 1);
+        cv::putText(frame, label, pt + cv::Point(12, 4),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1);
+    };
+
     if (orientation_ == InstrumentOrientation::kHorizontal) {
-        // Vertical lines at min/max X positions
         int y0 = bezelRect_.y;
         int y1 = bezelRect_.y + bezelRect_.height;
         cv::line(frame, cv::Point(pt_min_.x, y0), cv::Point(pt_min_.x, y1),
                  green, 1, cv::LINE_AA);
         cv::line(frame, cv::Point(pt_max_.x, y0), cv::Point(pt_max_.x, y1),
                  red, 1, cv::LINE_AA);
-
-        cv::circle(frame, pt_min_, kEdgewiseMarkerRadius, green, -1);
-        cv::circle(frame, pt_min_, kEdgewiseMarkerOutlineRadius, green, 1);
-        cv::putText(frame, "min", pt_min_ + cv::Point(12, 4),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, green, 1);
-
-        cv::circle(frame, pt_max_, kEdgewiseMarkerRadius, red, -1);
-        cv::circle(frame, pt_max_, kEdgewiseMarkerOutlineRadius, red, 1);
-        cv::putText(frame, "max", pt_max_ + cv::Point(12, 4),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, red, 1);
     } else {
-        // Horizontal lines at min/max Y positions
         int x0 = bezelRect_.x;
         int x1 = bezelRect_.x + bezelRect_.width;
         cv::line(frame, cv::Point(x0, pt_min_.y), cv::Point(x1, pt_min_.y),
                  green, 1, cv::LINE_AA);
         cv::line(frame, cv::Point(x0, pt_max_.y), cv::Point(x1, pt_max_.y),
                  red, 1, cv::LINE_AA);
-
-        cv::circle(frame, pt_min_, kEdgewiseMarkerRadius, green, -1);
-        cv::circle(frame, pt_min_, kEdgewiseMarkerOutlineRadius, green, 1);
-        cv::putText(frame, "min", pt_min_ + cv::Point(12, 4),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, green, 1);
-
-        cv::circle(frame, pt_max_, kEdgewiseMarkerRadius, red, -1);
-        cv::circle(frame, pt_max_, kEdgewiseMarkerOutlineRadius, red, 1);
-        cv::putText(frame, "max", pt_max_ + cv::Point(12, 4),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, red, 1);
     }
+
+    drawMarker(pt_min_, green, "min");
+    drawMarker(pt_max_, red, "max");
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -557,15 +544,7 @@ void EdgewiseGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
 
     DrawGaugeNumber(frame);
 
-    // Value text
-    std::ostringstream oss;
-    oss << "Value: ";
-    if (last_reading_.has_value())
-        oss << std::fixed << std::setprecision(2) << *last_reading_;
-    else
-        oss << "---";
-    cv::putText(frame, oss.str(), cv::Point(30, labelY),
-                cv::FONT_HERSHEY_SIMPLEX, 1.2, cv::Scalar(0, 255, 255), 3);
+    DrawValueText(frame, labelY);
 }
 
 // ═══════════════════════════════════════════════════════════════════

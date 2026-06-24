@@ -53,7 +53,7 @@ void rebuildCollapsibleSections(
         sections.pop_back();
     }
 
-    for (int i = 0; i < calib.size(); i++) {
+    for (qsizetype i = 0; i < calib.size(); i++) {
         auto* sec = new ui::QCollapsibleSection(
             gaugeTitle(i, calib[i].value),
             0, scrollContent);
@@ -149,8 +149,8 @@ void rebuildCollapsibleSections(
         QObject::connect(alarmDirCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), page,
                 [&sections, i, page](int index) {
                     emit page->alarmDirectionChanged(
-                        i, index == 0 ? AlarmDirection::kGreaterThan
-                                      : AlarmDirection::kLessThan);
+                        i, index == 0 ? AlarmDirection::kLessThan
+                                      : AlarmDirection::kGreaterThan);
                 });
 
         QObject::connect(alarmThresholdSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), page,

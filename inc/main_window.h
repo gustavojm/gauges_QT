@@ -44,10 +44,11 @@ private:
     QPointer<Worker> worker_ = nullptr;
     QThread* workerThread_ = nullptr;
 
-    VideoWidget* videoWidget_;
-    DetectionPage* detectionPage_;
-    CalibrationPage* calibrationPage_;
-    ProcessingPage* processingPage_;
+    VideoWidget* videoWidget_ = nullptr;
+    DetectionPage* detectionPage_ = nullptr;
+    CalibrationPage* calibrationPage_ = nullptr;
+    ProcessingPage* processingPage_ = nullptr;
+    
     AppMode currentMode_ = AppMode::kDetection;
 
     QTableWidget* alarmTable_ = nullptr;

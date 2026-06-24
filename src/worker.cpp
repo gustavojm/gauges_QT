@@ -1,4 +1,5 @@
 #include "worker.h"
+#include "gauge.h"
 
 #include <QDebug>
 #include <QBasicTimer>
@@ -84,15 +85,7 @@ void Worker::start() {
         qWarning() << "Could not reset to frame 0 in start()";
 
     det_.gauges.clear();
-        for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, 40)) {
-        auto g = std::make_unique<CircularGauge>(roi.center, roi.radius,
-                                                   Gauge::NextColor());
-        if (!roi.H.empty())
-            g->SetHomography(roi.H, roi.outSize, roi.center, roi.ellipse);
-        det_.gauges.push_back(std::move(g));
-    }
-    for (const auto& roi : EdgewiseGauge::FindGauges(firstFrame_, det_.canny))
-        det_.gauges.push_back(std::make_unique<EdgewiseGauge>(roi, Gauge::NextColor()));
+    detectGauges();
     displayDetectionOverlay();
     emit modeChanged(AppMode::kDetection);
 }
@@ -110,6 +103,22 @@ void Worker::displayDetectionOverlay() {
     emit detectionCountChanged(det_.gauges.size());
 }
 
+void Worker::detectGauges(bool onlyActiveType) {
+    if (!onlyActiveType || det_.activeType == GaugeType::kCircular) {
+        for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, 40)) {
+            auto g = std::make_unique<CircularGauge>(roi.center, roi.radius,
+                                                       Gauge::NextColor());
+            if (!roi.H.empty())
+                g->SetHomography(roi.H, roi.outSize, roi.center, roi.ellipse);
+            det_.gauges.push_back(std::move(g));
+        }
+    }
+    if (!onlyActiveType || det_.activeType == GaugeType::kEdgewise) {
+        for (const auto& roi : EdgewiseGauge::FindGauges(firstFrame_, det_.canny))
+            det_.gauges.push_back(std::make_unique<EdgewiseGauge>(roi, Gauge::NextColor()));
+    }
+}
+
 void Worker::reRunDetection() {
     std::vector<std::unique_ptr<Gauge>> preserved;
     for (auto& g : det_.gauges) {
@@ -124,19 +133,7 @@ void Worker::reRunDetection() {
     }
     det_.gauges.clear();
 
-    if (det_.activeType == GaugeType::kCircular) {
-        for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, 40)) {
-            auto g = std::make_unique<CircularGauge>(roi.center, roi.radius,
-                                                       Gauge::NextColor());
-            if (!roi.H.empty())
-                g->SetHomography(roi.H, roi.outSize, roi.center, roi.ellipse);
-            det_.gauges.push_back(std::move(g));
-        }
-    } else {
-        for (const auto& roi : EdgewiseGauge::FindGauges(firstFrame_, det_.canny))
-            det_.gauges.push_back(
-                std::make_unique<EdgewiseGauge>(roi, Gauge::NextColor()));
-    }
+    detectGauges(true);
 
     for (auto& g : preserved)
         det_.gauges.push_back(std::move(g));
@@ -144,8 +141,8 @@ void Worker::reRunDetection() {
     displayDetectionOverlay();
 }
 
-void Worker::setGaugeType(int typeIndex) {
-    det_.activeType = static_cast<GaugeType>(typeIndex);
+void Worker::setGaugeType(GaugeType type) {
+    det_.activeType = type;
     if (mode_ == AppMode::kDetection && !det_.manualPlacement)
         reRunDetection();
 }
@@ -289,18 +286,18 @@ void Worker::refreshCalibData() {
         out->minValue = d->min_value();
         out->maxValue = d->max_value();
         out->colorRgb = bgrToRgb(d->color());
+        out->tag = QString::fromStdString(d->tag());
         ++out;
     }
     emit calibrationDataReady(calibData_);
 }
 
 void Worker::updateGaugeValues() {
-    for (int i = 0; i < calibData_.size(); ++i) {
+    for (qsizetype i = 0; i < calibData_.size(); ++i) {
         calibData_[i].value = gauges_[i]->smoothed_value();
         calibData_[i].alarmEnabled = gauges_[i]->alarm_enabled();
         calibData_[i].alarmDirection = gauges_[i]->alarm_direction();
         calibData_[i].alarmThreshold = gauges_[i]->alarm_threshold();
-        calibData_[i].tag = QString::fromStdString(gauges_[i]->tag());
 
         bool triggered = gauges_[i]->checkAlarm();
         if (calibData_[i].alarmTriggered != triggered) {
@@ -393,6 +390,8 @@ void Worker::set_alarm_threshold(int idx, double threshold) {
 void Worker::setTag(int idx, const QString& tag) {
     if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
     gauges_[idx]->setTag(tag.toStdString());
+    if (idx < calibData_.size())
+        calibData_[idx].tag = tag;
 }
 
 // ═══════════════════════════════════════════════════════════════════
