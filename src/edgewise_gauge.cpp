@@ -1,5 +1,7 @@
 #include "edgewise_gauge.h"
 
+#include <QDebug>
+
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -96,7 +98,7 @@ std::vector<cv::Rect> EdgewiseGauge::FindGauges(const cv::Mat& frame,
             cv::Point ec(existing.x + existing.width / 2,
                          existing.y + existing.height / 2);
             double dist = cv::norm(center - ec);
-            double maxDist = std::min(existing.width, existing.height) *
+            double maxDist = (std::min)(existing.width, existing.height) *
                              kEdgewiseDuplicateDistFactor;
             if (dist < maxDist) {
                 duplicate = true;
@@ -461,8 +463,7 @@ void EdgewiseGauge::ResetMotionState() {
 // ═══════════════════════════════════════════════════════════════════
 
 void EdgewiseGauge::DrawOutline(cv::Mat& img) const {
-    cv::rectangle(img, bezelRect_, color_, 2, cv::LINE_AA);
-    DrawGaugeNumber(img);
+    cv::rectangle(img, bezelRect_, color_, 2, cv::LINE_AA);    
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -518,7 +519,7 @@ void EdgewiseGauge::DrawCalibrationOverlay(cv::Mat& frame) {
 //  Drawing — Processing Overlay
 // ═══════════════════════════════════════════════════════════════════
 
-void EdgewiseGauge::DrawOverlay(cv::Mat& frame, int labelY) {
+void EdgewiseGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
     // Bezel outline
     cv::rectangle(frame, bezelRect_, color_, 2, cv::LINE_AA);
 
@@ -530,6 +531,10 @@ void EdgewiseGauge::DrawOverlay(cv::Mat& frame, int labelY) {
 
     // Draw needle line
     if (last_reading_.has_value()) {
+        // Avoid division by zero if min and max values are equal
+        if (std::abs(max_value_ - min_value_) < 1e-6)
+            return;
+
         if (orientation_ == InstrumentOrientation::kHorizontal) {
             // Map value back to X for drawing
             double normalized = (*last_reading_ - min_value_) /
@@ -583,9 +588,8 @@ std::optional<cv::Rect> EdgewiseGauge::FitFromManualEdges(
         return std::nullopt;
 
     auto boundingRect = cv::boundingRect(edges);
-    std::cout << "  >> Manual edgewise gauge at ("
-              << boundingRect.x << ", " << boundingRect.y
-              << "), " << boundingRect.width << "x" << boundingRect.height
-              << "\n";
+    qDebug() << "Manual edgewise gauge at (" << boundingRect.x << ","
+             << boundingRect.y << ")," << boundingRect.width << "x"
+             << boundingRect.height;
     return boundingRect;
 }

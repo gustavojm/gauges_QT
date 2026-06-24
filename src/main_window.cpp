@@ -13,8 +13,6 @@
 #include <QTime>
 #include <QVBoxLayout>
 
-#include <iostream>
-
 constexpr int kControlPanelWidth = 300;
 constexpr int kAlarmTableHeight = 200;
 
@@ -219,4 +217,9 @@ void MainWindow::onAlarmTriggered(int gaugeIdx, bool triggered) {
     setItem(9, data.alarmTriggered ? "YES" : "No");
 
     alarmTable_->scrollToBottom();
+
+    if (row >= kMaxAlarmRows) {
+        alarmTable_->removeRow(0);
+    }
+
 }

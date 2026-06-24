@@ -1,5 +1,7 @@
 #include "circular_gauge.h"
 
+#include <QDebug>
+
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -348,13 +350,16 @@ std::optional<double> CircularGauge::AngleToValue(double needleAngle) const {
 //  Overlay Drawing
 // ═══════════════════════════════════════════════════════════════════
 
-void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) {
+void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
+    cv::Mat Hinv;
+    if (hasHomography_) {
+        cv::invert(homography_, Hinv);
+    }
+
     if (roi_.radius > 0) {
         if (hasHomography_) {
             // When homography is active, draw the warped circle outline
             // projected back into the original frame via inverse homography
-            cv::Mat Hinv;
-            cv::invert(homography_, Hinv);
             int side = (std::min)(warpSize_.width, warpSize_.height);
             int drawR = side / 2;
             // Draw ~20 points around the rectified circle, warped back
@@ -387,8 +392,6 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) {
                 float sy = rectCenter_.y + arcR * static_cast<float>(std::sin(scale_.start_angle));
                 float ex = rectCenter_.x + arcR * static_cast<float>(std::cos(scale_.end_angle));
                 float ey = rectCenter_.y + arcR * static_cast<float>(std::sin(scale_.end_angle));
-                cv::Mat Hinv;
-                cv::invert(homography_, Hinv);
                 std::vector<cv::Point2f> src, dst;
                 src.emplace_back(sx, sy);
                 src.emplace_back(ex, ey);
@@ -438,8 +441,6 @@ void CircularGauge::DrawOverlay(cv::Mat& frame, int labelY) {
                     roi_.radius * kNeedleLengthFactor * static_cast<float>(std::cos(angle_));
                 float tipY = rectCenter_.y +
                     roi_.radius * kNeedleLengthFactor * static_cast<float>(std::sin(angle_));
-                cv::Mat Hinv;
-                cv::invert(homography_, Hinv);
                 std::vector<cv::Point2f> src, dst;
                 src.emplace_back(rectCenter_.x, rectCenter_.y);
                 src.emplace_back(tipX, tipY);
@@ -542,7 +543,7 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) {
 
         // Scale toward rectified center by kRadiusInset
         std::vector<cv::Point2f> ptsInset;
-        for (auto& p : ptsRect) {
+        for (const auto& p : ptsRect) {
             float dx = p.x - rectCenter_.x;
             float dy = p.y - rectCenter_.y;
             ptsInset.emplace_back(rectCenter_.x + dx * kRadiusInset,
@@ -627,7 +628,7 @@ int CircularGauge::HandleClick(int clickX, int clickY) {
         std::vector<cv::Point2f> ptsRect;
         cv::perspectiveTransform(pts, ptsRect, homography_);
         std::vector<cv::Point2f> ptsInset;
-        for (auto& p : ptsRect) {
+        for (const auto& p : ptsRect) {
             float dx = p.x - rectCenter_.x;
             float dy = p.y - rectCenter_.y;
             ptsInset.emplace_back(rectCenter_.x + dx * kRadiusInset,
@@ -675,7 +676,6 @@ void CircularGauge::DrawOutline(cv::Mat& img) const {
     } else {
         cv::circle(img, roi_.center, roi_.radius, color_, kCircleThickness);
     }
-    DrawGaugeNumber(img);
 }
 
 CircularGauge::CircularGauge(const cv::Point& center, int radius,
@@ -738,119 +738,12 @@ void CircularGauge::MoveMarker(int which, cv::Point click) {
 //  Ellipse-to-Circle Homography
 // ═══════════════════════════════════════════════════════════════════
 
-bool CircularGauge::ComputeHomography(const std::vector<cv::Point>& pts,
-                                      cv::Mat& H, cv::Size& outSize,
-                                      cv::RotatedRect& ellipseRect,
-                                      cv::Point& inferredCenter) {
-    if (pts.size() < 5) return false;
-
-    // Use OpenCV's robust ellipse fitter (handles noisy points)
-    std::vector<cv::Point2f> ptsF;
-    ptsF.reserve(pts.size());
-    for (const auto& p : pts)
-        ptsF.emplace_back(static_cast<float>(p.x), static_cast<float>(p.y));
-
-    cv::RotatedRect rr = cv::fitEllipse(ptsF);
-
-    float a = rr.size.width * 0.5f;   // semi-major or semi-minor
-    float b = rr.size.height * 0.5f;
-    if (a < 1.0f || b < 1.0f) return false;
-
-    float cx = rr.center.x;
-    float cy = rr.center.y;
-    inferredCenter = cv::Point(cvRound(cx), cvRound(cy));
-
-    // Ensure a >= b for the eigendecomposition below
+bool CircularGauge::buildHomographyFromEllipse(float cx, float cy,
+                                               float a, float b,
+                                               double theta, double R,
+                                               cv::Mat& H, cv::Size& outSize) {
     bool swapped = false;
     if (a < b) { std::swap(a, b); swapped = true; }
-
-    // Angle from RotatedRect (degrees → radians)
-    double theta = rr.angle * kPi / 180.0;
-    if (swapped) theta += kPi / 2.0;  // adjust if axes were swapped
-
-    // Conic matrix M from semi-axes and rotation:
-    //   cos²θ/a² + sin²θ/b²       (cosθ sinθ)(1/a² - 1/b²)
-    //   (cosθ sinθ)(1/a² - 1/b²)  sin²θ/a² + cos²θ/b²
-    double cosT = std::cos(theta), sinT = std::sin(theta);
-    double invA2 = 1.0 / (a * a);
-    double invB2 = 1.0 / (b * b);
-
-    double M00 = cosT * cosT * invA2 + sinT * sinT * invB2;
-    double M01 = cosT * sinT * (invA2 - invB2);
-    double M11 = sinT * sinT * invA2 + cosT * cosT * invB2;
-
-    // Eigendecomposition of M
-    double trace = M00 + M11;
-    double detM = M00 * M11 - M01 * M01;
-    double disc = std::sqrt((std::max)(0.0, trace * trace * 0.25 - detM));
-    double lamBig = trace * 0.5 + disc;
-    double lamSmall = trace * 0.5 - disc;
-    if (lamSmall < 1e-15) return false;
-
-    // Eigenvector for lamSmall (= semi-MAJOR axis direction)
-    double ex, ey;
-    if (std::abs(M01) > 1e-15) {
-        ex = lamSmall - M11;
-        ey = M01;
-    } else if (std::abs(M00 - lamSmall) > std::abs(M11 - lamSmall)) {
-        ex = M01;
-        ey = lamSmall - M00;
-    } else {
-        ex = 1.0;
-        ey = 0.0;
-    }
-    double len = std::sqrt(ex * ex + ey * ey);
-    if (len < 1e-15) return false;
-    ex /= len;
-    ey /= len;
-
-    double s1 = std::sqrt(lamBig);
-    double s2 = std::sqrt(lamSmall);
-
-    double h00 = s1 * ey * ey + s2 * ex * ex;
-    double h01 = (s2 - s1) * ex * ey;
-    double h10 = h01;
-    double h11 = s1 * ex * ex + s2 * ey * ey;
-
-    // Output radius: average distance from center to points
-    double R = 0;
-    for (const auto& p : pts) {
-        double dx = p.x - cx, dy = p.y - cy;
-        R += std::sqrt(dx * dx + dy * dy);
-    }
-    R /= static_cast<double>(pts.size());
-
-    // Full homography with translation to (R, R)
-    H = cv::Mat::eye(3, 3, CV_64F);
-    H.at<double>(0, 0) = R * h00;
-    H.at<double>(0, 1) = R * h01;
-    H.at<double>(0, 2) = R * (1.0 - h00 * cx - h01 * cy);
-    H.at<double>(1, 0) = R * h10;
-    H.at<double>(1, 1) = R * h11;
-    H.at<double>(1, 2) = R * (1.0 - h10 * cx - h11 * cy);
-
-    int side = cvRound(R * 2.0);
-    outSize = cv::Size(side, side);
-    ellipseRect = rr;
-
-    return true;
-}
-
-bool CircularGauge::HomographyFromEllipse(const cv::RotatedRect& rr,
-                                          cv::Mat& H, cv::Size& outSize,
-                                          cv::Point& inferredCenter) {
-    float a = rr.size.width * 0.5f;
-    float b = rr.size.height * 0.5f;
-    if (a < 1.0f || b < 1.0f) return false;
-
-    float cx = rr.center.x;
-    float cy = rr.center.y;
-    inferredCenter = cv::Point(cvRound(cx), cvRound(cy));
-
-    bool swapped = false;
-    if (a < b) { std::swap(a, b); swapped = true; }
-
-    double theta = rr.angle * kPi / 180.0;
     if (swapped) theta += kPi / 2.0;
 
     double cosT = std::cos(theta), sinT = std::sin(theta);
@@ -892,9 +785,6 @@ bool CircularGauge::HomographyFromEllipse(const cv::RotatedRect& rr,
     double h10 = h01;
     double h11 = s1 * ex * ex + s2 * ey * ey;
 
-    // R = average of semi-axes (circle radius in rectified space)
-    double R = (a + b) * 0.5;
-
     H = cv::Mat::eye(3, 3, CV_64F);
     H.at<double>(0, 0) = R * h00;
     H.at<double>(0, 1) = R * h01;
@@ -907,6 +797,64 @@ bool CircularGauge::HomographyFromEllipse(const cv::RotatedRect& rr,
     outSize = cv::Size(side, side);
 
     return true;
+}
+
+bool CircularGauge::ComputeHomography(const std::vector<cv::Point>& pts,
+                                      cv::Mat& H, cv::Size& outSize,
+                                      cv::RotatedRect& ellipseRect,
+                                      cv::Point& inferredCenter) {
+    if (pts.size() < 5) return false;
+
+    // Use OpenCV's robust ellipse fitter (handles noisy points)
+    std::vector<cv::Point2f> ptsF;
+    ptsF.reserve(pts.size());
+    for (const auto& p : pts)
+        ptsF.emplace_back(static_cast<float>(p.x), static_cast<float>(p.y));
+
+    cv::RotatedRect rr = cv::fitEllipse(ptsF);
+
+    float a = rr.size.width * 0.5f;
+    float b = rr.size.height * 0.5f;
+    if (a < 1.0f || b < 1.0f) return false;
+
+    float cx = rr.center.x;
+    float cy = rr.center.y;
+    inferredCenter = cv::Point(cvRound(cx), cvRound(cy));
+
+    double theta = rr.angle * kPi / 180.0;
+
+    // R = average distance from center to contour points
+    double R = 0;
+    for (const auto& p : pts) {
+        double dx = p.x - cx, dy = p.y - cy;
+        R += std::sqrt(dx * dx + dy * dy);
+    }
+    R /= static_cast<double>(pts.size());
+
+    if (!buildHomographyFromEllipse(cx, cy, a, b, theta, R, H, outSize))
+        return false;
+
+    ellipseRect = rr;
+    return true;
+}
+
+bool CircularGauge::HomographyFromEllipse(const cv::RotatedRect& rr,
+                                          cv::Mat& H, cv::Size& outSize,
+                                          cv::Point& inferredCenter) {
+    float a = rr.size.width * 0.5f;
+    float b = rr.size.height * 0.5f;
+    if (a < 1.0f || b < 1.0f) return false;
+
+    float cx = rr.center.x;
+    float cy = rr.center.y;
+    inferredCenter = cv::Point(cvRound(cx), cvRound(cy));
+
+    double theta = rr.angle * kPi / 180.0;
+
+    // R = average of semi-axes (circle radius in rectified space)
+    double R = (a + b) * 0.5;
+
+    return buildHomographyFromEllipse(cx, cy, a, b, theta, R, H, outSize);
 }
 
 void CircularGauge::SetHomography(const cv::Mat& H, const cv::Size& outSize,
@@ -1150,13 +1098,12 @@ std::optional<CircularGauge::ROI> CircularGauge::FitFromManualEdges(
         result.hasEllipse = true;
         result.H = H;
         result.outSize = outSize;
-        std::cout << "  >> Manual gauge at ("
-                  << inferredCenter.x << ", " << inferredCenter.y
-                  << "), warped to " << outSize.width << "x"
-                  << outSize.height << "\n";
+        qDebug() << "Manual gauge at (" << inferredCenter.x << ","
+                 << inferredCenter.y << "), warped to" << outSize.width
+                 << "x" << outSize.height;
     } else {
-        std::cerr << "  >> Ellipse fit failed — points may be "
-                     "collinear or not form an ellipse.\n";
+        qWarning() << "Ellipse fit failed — points may be collinear or not form an ellipse.";
+        return std::nullopt;
     }
     return result;
 }

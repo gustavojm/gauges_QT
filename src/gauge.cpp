@@ -13,7 +13,6 @@ Gauge::Gauge(const cv::Point& center, int radius, const cv::Scalar& color)
     : roi_({center, radius})
     , roi_ref_({center, radius})
     , color_(color)
-    , number_(next_number_++)
 {
     pt_min_ = center;
     pt_max_ = center;
@@ -78,14 +77,14 @@ void Gauge::ResetSmoothing() {
 }
 
 bool Gauge::checkAlarm() const {
-    if (!alarmEnabled_ || !smoothed_reading_.has_value())
+    if (!alarm_enabled_ || !smoothed_reading_.has_value())
         return false;
 
     double val = *smoothed_reading_;
-    if (alarmDirection_ == AlarmDirection::kGreaterThan)
-        return val > alarmThreshold_;
+    if (alarm_direction_ == AlarmDirection::kGreaterThan)
+        return val > alarm_threshold_;
     else
-        return val < alarmThreshold_;
+        return val < alarm_threshold_;
 }
 
 void Gauge::ResetMotionState() {

@@ -53,7 +53,7 @@ namespace ui
         static const int DEFAULT_DURATION = 0;
     
         // initialize section
-        explicit QCollapsibleSection(const QString& title = "", const int animationDuration = DEFAULT_DURATION, QWidget* parent = 0);
+        explicit QCollapsibleSection(const QString& title = "", const int animationDuration = DEFAULT_DURATION, QWidget* parent = nullptr);
 
         // set layout of content (takes ownership)
         void setContentLayout(QLayout* contentLayout);

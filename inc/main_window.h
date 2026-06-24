@@ -4,6 +4,7 @@
 #include <QKeyEvent>
 #include <QMainWindow>
 #include <QTableWidget>
+#include <QPointer>
 
 #include <string>
 
@@ -13,6 +14,8 @@
 #include "detection_page.h"
 #include "calibration_page.h"
 #include "processing_page.h"
+
+inline constexpr int kMaxAlarmRows = 1000;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -38,7 +41,7 @@ private slots:
 private:
     void setMode(AppMode mode);
 
-    Worker* worker_ = nullptr;
+    QPointer<Worker> worker_ = nullptr;
     QThread* workerThread_ = nullptr;
 
     VideoWidget* videoWidget_;

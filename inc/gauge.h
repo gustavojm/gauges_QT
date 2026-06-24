@@ -47,8 +47,8 @@ public:
     Gauge(const cv::Point& center, int radius, const cv::Scalar& color);
     virtual ~Gauge() = default;
 
-    bool isManual() const { return isManual_; }
-    void setManual(bool manual) { isManual_ = manual; }
+    bool is_manual() const { return is_manual_; }
+    void set_manual(bool manual) { is_manual_ = manual; }
 
     // ─── Tag ──────────────────────────────────────────────────────
     void setTag(const std::string& tag) { tag_ = tag; }
@@ -59,21 +59,21 @@ public:
 
     // ─── Calibration (generic) ────────────────────────────────────
     virtual void SetCalibrationValues(double minVal, double maxVal);
-    double minValue() const { return min_value_; }
-    double maxValue() const { return max_value_; }
+    double min_value() const { return min_value_; }
+    double max_value() const { return max_value_; }
 
     // ─── Smoothing ────────────────────────────────────────────────
     void AddReading(std::optional<double> reading);
-    std::optional<double> smoothedValue() const { return smoothed_reading_; }
+    std::optional<double> smoothed_value() const { return smoothed_reading_; }
     void ResetSmoothing();
 
     // ─── Alarm ────────────────────────────────────────────────────
-    void setAlarmEnabled(bool enabled) { alarmEnabled_ = enabled; }
-    void setAlarmDirection(AlarmDirection dir) { alarmDirection_ = dir; }
-    void setAlarmThreshold(double threshold) { alarmThreshold_ = threshold; }
-    bool alarmEnabled() const { return alarmEnabled_; }
-    AlarmDirection alarmDirection() const { return alarmDirection_; }
-    double alarmThreshold() const { return alarmThreshold_; }
+    void set_alarm_enabled(bool enabled) { alarm_enabled_ = enabled; }
+    void set_alarm_direction(AlarmDirection dir) { alarm_direction_ = dir; }
+    void set_alarm_threshold(double threshold) { alarm_threshold_ = threshold; }
+    bool alarm_enabled() const { return alarm_enabled_; }
+    AlarmDirection alarm_direction() const { return alarm_direction_; }
+    double alarm_threshold() const { return alarm_threshold_; }
     bool checkAlarm() const;
 
     // ─── Motion State Reset ───────────────────────────────────────
@@ -81,6 +81,9 @@ public:
 
     // ─── State Access ─────────────────────────────────────────────
     int number() const { return number_; }
+    static int next_number() { next_number_++; return next_number_; }
+    static int restart_next_number() { next_number_ = 1; return next_number_; }
+    void set_number(int number) {  number_ = number; }
     const cv::Scalar& color() const { return color_; }
     const ROI& roi() const { return roi_; }
 
@@ -92,7 +95,7 @@ public:
     virtual void UpdateROI(const cv::Mat& frame) = 0;
     virtual std::optional<double> DetectNeedle(const cv::Mat& frame) = 0;
     virtual void FinalizeCalibration() = 0;
-    virtual void DrawOverlay(cv::Mat& frame, int labelY = 60) = 0;
+    virtual void DrawOverlay(cv::Mat& frame, int labelY = 60) const = 0;
     virtual void DrawCalibrationOverlay(cv::Mat& frame) = 0;
     virtual void DrawOutline(cv::Mat& img) const = 0;
     virtual int  HandleClick(int clickX, int clickY) = 0;
@@ -119,14 +122,14 @@ protected:
     std::optional<double> smoothed_reading_ = std::nullopt;
 
     // Alarm
-    bool alarmEnabled_ = false;
-    AlarmDirection alarmDirection_ = AlarmDirection::kGreaterThan;
-    double alarmThreshold_ = 0;
+    bool alarm_enabled_ = false;
+    AlarmDirection alarm_direction_ = AlarmDirection::kGreaterThan;
+    double alarm_threshold_ = 0;
 
     // Gauge identification
     int number_ = 0;
     static int next_number_;
-    bool isManual_ = false;
+    bool is_manual_ = false;
     std::string tag_;
 
     // Motion compensation state

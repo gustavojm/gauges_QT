@@ -103,8 +103,8 @@ void rebuildCollapsibleSections(
         alarmDirLay->setContentsMargins(0, 0, 0, 0);
         alarmDirLay->addWidget(new QLabel("Alarm:"));
         auto* alarmDirCombo = new QComboBox();
-        alarmDirCombo->addItem("Greater than");
-        alarmDirCombo->addItem("Less than");
+        alarmDirCombo->addItem("<");
+        alarmDirCombo->addItem(">");
         alarmDirCombo->setCurrentIndex(
             calib[i].alarmDirection == AlarmDirection::kGreaterThan ? 0 : 1);
         alarmDirLay->addWidget(alarmDirCombo, 1);

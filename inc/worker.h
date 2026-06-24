@@ -36,9 +36,6 @@ struct DetectionState {
     GaugeType activeType = GaugeType::kCircular;
     bool manualPlacement = false;
     int canny = 320;
-
-    enum class ManualStage { kEdge1, kEdge2, kEdge3, kEdge4, kEdge5 };
-    ManualStage manualStage = ManualStage::kEdge1;
     std::vector<cv::Point> manualEdges;
 };
 
@@ -77,9 +74,9 @@ public slots:
     void confirmGauges();
     void confirmCalib();
     void setGaugeCalibRange(int idx, double minVal, double maxVal);
-    void setAlarmEnabled(int idx, bool enabled);
-    void setAlarmDirection(int idx, AlarmDirection direction);
-    void setAlarmThreshold(int idx, double threshold);
+    void set_alarm_enabled(int idx, bool enabled);
+    void set_alarm_direction(int idx, AlarmDirection direction);
+    void set_alarm_threshold(int idx, double threshold);
     void setTag(int idx, const QString& tag);
     void onDragMove(int x, int y);
     void onDragRelease();

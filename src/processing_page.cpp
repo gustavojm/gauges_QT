@@ -90,11 +90,11 @@ void ProcessingPage::connectToWorker(Worker* worker) {
     connect(this, &ProcessingPage::gaugeCalibRangeChanged,
             worker, &Worker::setGaugeCalibRange);
     connect(this, &ProcessingPage::alarmEnableChanged,
-            worker, &Worker::setAlarmEnabled);
+            worker, &Worker::set_alarm_enabled);
     connect(this, &ProcessingPage::alarmDirectionChanged,
-            worker, &Worker::setAlarmDirection);
+            worker, &Worker::set_alarm_direction);
     connect(this, &ProcessingPage::alarmThresholdChanged,
-            worker, &Worker::setAlarmThreshold);
+            worker, &Worker::set_alarm_threshold);
     connect(this, &ProcessingPage::tagChanged,
             worker, &Worker::setTag);
     connect(worker, &Worker::calibrationDataReady,

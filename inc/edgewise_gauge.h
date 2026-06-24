@@ -48,7 +48,7 @@ public:
     void UpdateROI(const cv::Mat& frame) override;
     std::optional<double> DetectNeedle(const cv::Mat& frame) override;
     void FinalizeCalibration() override;
-    void DrawOverlay(cv::Mat& frame, int labelY = 60) override;
+    void DrawOverlay(cv::Mat& frame, int labelY = 60) const override;
     void DrawCalibrationOverlay(cv::Mat& frame) override;
     void DrawOutline(cv::Mat& img) const override;
     int  HandleClick(int clickX, int clickY) override;
@@ -56,7 +56,7 @@ public:
     void ResetMotionState() override;
 
     // ─── Accessors ────────────────────────────────────────────────
-    const cv::Rect& bezelRect() const { return bezelRect_; }
+    const cv::Rect& bezel_rect() const { return bezelRect_; }
     InstrumentOrientation orientation() const { return orientation_; }
 
     // ─── Edgewise-specific: manual placement ──────────────────────

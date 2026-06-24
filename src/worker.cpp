@@ -1,9 +1,9 @@
 #include "worker.h"
 
+#include <QDebug>
 #include <QBasicTimer>
 #include <QThread>
 
-#include <iostream>
 #include <opencv2/core/types.hpp>
 
 namespace {
@@ -67,7 +67,7 @@ QImage Worker::matToQImage(const cv::Mat& bgr) {
 void Worker::start() {
     cap_.open(videoPath_);
     if (!cap_.isOpened()) {
-        std::cerr << "Worker: Could not open video\n";
+        qCritical() << "Worker: Could not open video";
         emit finished();
         return;
     }
@@ -76,12 +76,12 @@ void Worker::start() {
     fps_ = cap_.get(cv::CAP_PROP_FPS);
 
     if (!cap_.read(firstFrame_)) {
-        std::cerr << "Worker: Could not read first frame\n";
+        qCritical() << "Worker: Could not read first frame";
         emit finished();
         return;
     }
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
-        std::cerr << "Warning: Could not reset to frame 0 in start()\n";
+        qWarning() << "Could not reset to frame 0 in start()";
 
     det_.gauges.clear();
         for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, 40)) {
@@ -103,7 +103,6 @@ void Worker::start() {
 
 void Worker::displayDetectionOverlay() {
     cv::Mat disp = firstFrame_.clone();
-    const cv::Scalar color = {0, 0, 255};
     for (const auto& g : det_.gauges) {
         g->DrawOutline(disp);
     }
@@ -114,7 +113,7 @@ void Worker::displayDetectionOverlay() {
 void Worker::reRunDetection() {
     std::vector<std::unique_ptr<Gauge>> preserved;
     for (auto& g : det_.gauges) {
-        if (g->isManual()) {
+        if (g->is_manual()) {
             preserved.push_back(std::move(g));
         } else if ((det_.activeType == GaugeType::kCircular &&
                     !dynamic_cast<CircularGauge*>(g.get())) ||
@@ -141,7 +140,7 @@ void Worker::reRunDetection() {
 
     for (auto& g : preserved)
         det_.gauges.push_back(std::move(g));
-
+   
     displayDetectionOverlay();
 }
 
@@ -154,7 +153,6 @@ void Worker::setGaugeType(int typeIndex) {
 void Worker::setManualPlacement(bool enabled) {
     det_.manualPlacement = enabled;
     if (enabled) {
-        det_.manualStage = DetectionState::ManualStage::kEdge1;
         det_.manualEdges.clear();
         emit manualInstructionChanged(0);
     }
@@ -188,13 +186,14 @@ void Worker::handleDetectionClick(int x, int y) {
     int n = static_cast<int>(det_.manualEdges.size());
 
     bool created = false;
+    auto color = Gauge::NextColor();
     switch (det_.activeType) {
         case GaugeType::kEdgewise: {
             auto roi = EdgewiseGauge::FitFromManualEdges(det_.manualEdges);
             if (roi) {
                 det_.gauges.push_back(
-                    std::make_unique<EdgewiseGauge>(*roi, Gauge::NextColor()));
-                det_.gauges.back()->setManual(true);
+                    std::make_unique<EdgewiseGauge>(*roi, color));
+                det_.gauges.back()->set_manual(true);
                 created = true;
             }
             break;
@@ -203,22 +202,18 @@ void Worker::handleDetectionClick(int x, int y) {
             auto roi = CircularGauge::FitFromManualEdges(det_.manualEdges);
             if (roi && !roi->H.empty()) {
                 auto g = std::make_unique<CircularGauge>(
-                    roi->center, roi->radius, Gauge::NextColor());
+                    roi->center, roi->radius, color);
                 g->SetHomography(roi->H, roi->outSize, roi->center, roi->ellipse);
-                g->setManual(true);
+                g->set_manual(true);
                 det_.gauges.push_back(std::move(g));
                 created = true;
             }
             break;
         }
-
-        default:
-            break;
     }
 
     if (created) {
         det_.manualEdges.clear();
-        det_.manualStage = DetectionState::ManualStage::kEdge1;
         emit manualInstructionChanged(0);
     } else {
         emit manualInstructionChanged(n);
@@ -226,10 +221,8 @@ void Worker::handleDetectionClick(int x, int y) {
 
     // Draw overlay
     cv::Mat disp = firstFrame_.clone();
-    int label = 1;
     for (const auto& g : det_.gauges) {
         g->DrawOutline(disp);
-        label++;
     }
 
     // Draw placed edge points and lines between them
@@ -292,9 +285,9 @@ void Worker::refreshCalibData() {
     calibData_.resize(static_cast<int>(gauges_.size()));
     auto out = calibData_.begin();
     for (const auto& d : gauges_) {
-        out->value = d->smoothedValue();
-        out->minValue = d->minValue();
-        out->maxValue = d->maxValue();
+        out->value = d->smoothed_value();
+        out->minValue = d->min_value();
+        out->maxValue = d->max_value();
         out->colorRgb = bgrToRgb(d->color());
         ++out;
     }
@@ -303,10 +296,10 @@ void Worker::refreshCalibData() {
 
 void Worker::updateGaugeValues() {
     for (int i = 0; i < calibData_.size(); ++i) {
-        calibData_[i].value = gauges_[i]->smoothedValue();
-        calibData_[i].alarmEnabled = gauges_[i]->alarmEnabled();
-        calibData_[i].alarmDirection = gauges_[i]->alarmDirection();
-        calibData_[i].alarmThreshold = gauges_[i]->alarmThreshold();
+        calibData_[i].value = gauges_[i]->smoothed_value();
+        calibData_[i].alarmEnabled = gauges_[i]->alarm_enabled();
+        calibData_[i].alarmDirection = gauges_[i]->alarm_direction();
+        calibData_[i].alarmThreshold = gauges_[i]->alarm_threshold();
         calibData_[i].tag = QString::fromStdString(gauges_[i]->tag());
 
         bool triggered = gauges_[i]->checkAlarm();
@@ -332,14 +325,24 @@ void Worker::confirmGauges() {
         return;
 
     gauges_.clear();
+
+    std::sort(det_.gauges.begin(), det_.gauges.end(), [](const auto& a, const auto& b) {
+        if (a->roi().center.y != b->roi().center.y)
+            return a->roi().center.y < b->roi().center.y;   // top to bottom
+
+        return a->roi().center.x < b->roi().center.x;       // left to right
+    });
+
     for (auto& g : det_.gauges) {
-        std::cout << "  >> Gauge " << gauges_.size()
-                  << " at (" << g->roi().center.x << ", "
+        int num = gauges_.size() + 1;
+        qDebug() << "Gauge" << num
+                  << "at (" << g->roi().center.x << ","
                   << g->roi().center.y << ")"
                   << (dynamic_cast<CircularGauge*>(g.get()) &&
-                      dynamic_cast<CircularGauge*>(g.get())->hasHomography()
-                          ? " [homography]" : "")
-                  << "\n";
+                      dynamic_cast<CircularGauge*>(g.get())->has_homography()
+                          ? " [homography]" : "");
+
+        g->set_number(num);
         gauges_.push_back(std::move(g));
     }
     det_.gauges.clear();
@@ -350,15 +353,15 @@ void Worker::confirmGauges() {
 void Worker::confirmCalib() {
     if (mode_ != AppMode::kCalibration || gauges_.empty()) return;
 
-    for (auto& d : gauges_) {
+    for (const auto& d : gauges_) {
         d->FinalizeCalibration();
         // Log circular-specific scale info
         if (auto* cg = dynamic_cast<CircularGauge*>(d.get())) {
             const auto& s = cg->scale();
-            std::cout << "  >> Gauge scale: " << s.min_value << " at "
-                      << (s.start_angle * 180.0 / kPi) << " deg, "
-                      << s.max_value << " at "
-                      << (s.end_angle * 180.0 / kPi) << " deg\n";
+            qDebug() << "Gauge scale:" << s.min_value << "at"
+                      << (s.start_angle * 180.0 / kPi) << "deg,"
+                      << s.max_value << "at"
+                      << (s.end_angle * 180.0 / kPi) << "deg";
         }
     }
     enterProcessing();
@@ -372,19 +375,19 @@ void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
         publishCalibrationDisplay();
 }
 
-void Worker::setAlarmEnabled(int idx, bool enabled) {
+void Worker::set_alarm_enabled(int idx, bool enabled) {
     if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
-    gauges_[idx]->setAlarmEnabled(enabled);
+    gauges_[idx]->set_alarm_enabled(enabled);
 }
 
-void Worker::setAlarmDirection(int idx, AlarmDirection direction) {
+void Worker::set_alarm_direction(int idx, AlarmDirection direction) {
     if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
-    gauges_[idx]->setAlarmDirection(direction);
+    gauges_[idx]->set_alarm_direction(direction);
 }
 
-void Worker::setAlarmThreshold(int idx, double threshold) {
+void Worker::set_alarm_threshold(int idx, double threshold) {
     if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
-    gauges_[idx]->setAlarmThreshold(threshold);
+    gauges_[idx]->set_alarm_threshold(threshold);
 }
 
 void Worker::setTag(int idx, const QString& tag) {
@@ -398,7 +401,7 @@ void Worker::setTag(int idx, const QString& tag) {
 
 void Worker::enterProcessing() {
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
-        std::cerr << "Warning: Could not reset to frame 0 in enterProcessing()\n";
+        qWarning() << "Could not reset to frame 0 in enterProcessing()";
 
     frameCount_ = 0;
     motionInitialized_ = false;
@@ -417,7 +420,7 @@ void Worker::processNextFrame() {
 
     cv::Mat frame;
     if (!cap_.read(frame)) {
-        std::cout << "End of video.\n";
+        qDebug() << "End of video";
         emit finished();
         return;
     }
@@ -426,14 +429,14 @@ void Worker::processNextFrame() {
         // Initialize motion features on the first processing frame
         // (skip for gauges that use homography-based rectification)
         if (!motionInitialized_) {
-            for (auto& d : gauges_) {
+            for (const auto& d : gauges_) {
                 d->InitMotionFeatures(frame);
             }
             motionInitialized_ = true;
         }
 
         int labelY = 60;
-        for (auto& d : gauges_) {
+        for (const auto& d : gauges_) {
             d->UpdateROI(frame);
             d->DetectNeedle(frame);
             d->DrawOverlay(frame, labelY);
@@ -455,8 +458,8 @@ void Worker::restart() {
     chainTimer_.stop();
     if (mode_ != AppMode::kProcessing) return;
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
-        std::cerr << "Warning: Could not reset to frame 0 in restart()\n";
-    for (auto& d : gauges_) {
+        qWarning() << "Could not reset to frame 0 in restart()";
+    for (const auto& d : gauges_) {
         d->ResetMotionState();
         d->ResetSmoothing();
     }

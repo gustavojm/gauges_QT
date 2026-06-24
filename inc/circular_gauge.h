@@ -77,9 +77,9 @@ public:
     void SetHomography(const cv::Mat& H, const cv::Size& outSize,
                        cv::Point center, cv::RotatedRect ellipseRect = {});
     cv::Mat WarpFrame(const cv::Mat& frame) const;
-    bool hasHomography() const { return hasHomography_; }
+    bool has_homography() const { return hasHomography_; }
     const cv::Mat& homography() const { return homography_; }
-    const cv::Size& warpSize() const { return warpSize_; }
+    const cv::Size& warp_size() const { return warpSize_; }
 
     // ─── Gauge interface overrides ────────────────────────────────
     void InitMotionFeatures(const cv::Mat& frame) override;
@@ -87,7 +87,7 @@ public:
     std::optional<double> DetectNeedle(const cv::Mat& frame) override;
     void FinalizeCalibration() override;
     void SetCalibrationValues(double minVal, double maxVal) override;
-    void DrawOverlay(cv::Mat& frame, int labelY = 60) override;
+    void DrawOverlay(cv::Mat& frame, int labelY = 60) const override;
     void DrawCalibrationOverlay(cv::Mat& frame) override;
     void DrawOutline(cv::Mat& img) const override;
     int  HandleClick(int clickX, int clickY) override;
@@ -112,6 +112,13 @@ private:
         double density;
         double reach;
     };
+
+    // Shared eigendecomposition + homography construction for ComputeHomography
+    // and HomographyFromEllipse. Only R differs between the two callers.
+    static bool buildHomographyFromEllipse(float cx, float cy,
+                                           float a, float b,
+                                           double theta, double R,
+                                           cv::Mat& H, cv::Size& outSize);
 
     ScaleCalibration scale_;
 
