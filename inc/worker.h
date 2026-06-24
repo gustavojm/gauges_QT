@@ -86,6 +86,8 @@ public slots:
     void restart();
     void quit();
 
+    const QVector<GaugeCalibData>& calibData() const { return calibData_; }
+
 private:
     void timerEvent(QTimerEvent* event) override;
     void processNextFrame();

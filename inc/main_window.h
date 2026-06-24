@@ -3,6 +3,7 @@
 #include <QCloseEvent>
 #include <QKeyEvent>
 #include <QMainWindow>
+#include <QTableWidget>
 
 #include <string>
 
@@ -31,6 +32,9 @@ protected:
     void closeEvent(QCloseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
 
+private slots:
+    void onAlarmTriggered(int gaugeIdx, bool triggered);
+
 private:
     void setMode(AppMode mode);
 
@@ -42,4 +46,6 @@ private:
     CalibrationPage* calibrationPage_;
     ProcessingPage* processingPage_;
     AppMode currentMode_ = AppMode::kDetection;
+
+    QTableWidget* alarmTable_ = nullptr;
 };

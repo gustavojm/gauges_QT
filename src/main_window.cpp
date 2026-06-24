@@ -3,17 +3,20 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QStatusBar>
 #include <QThread>
+#include <QTime>
 #include <QVBoxLayout>
 
 #include <iostream>
 
 constexpr int kControlPanelWidth = 300;
+constexpr int kAlarmTableHeight = 200;
 
 MainWindow::MainWindow(const std::string& videoPath)
 {
@@ -46,7 +49,13 @@ MainWindow::MainWindow(const std::string& videoPath)
 
     statusBar()->showMessage("Ready");
 
-    auto* mainLayout = new QHBoxLayout(central);
+    auto* verticalLayout = new QVBoxLayout(central);
+    verticalLayout->setContentsMargins(0, 0, 0, 0);
+    verticalLayout->setSpacing(0);
+
+    // ── Top area: video + control panel ─────────────────────────
+    auto* topWidget = new QWidget(this);
+    auto* mainLayout = new QHBoxLayout(topWidget);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
@@ -71,6 +80,23 @@ MainWindow::MainWindow(const std::string& videoPath)
     controlLayout->addWidget(processingPage_);
     controlLayout->addStretch();
     mainLayout->addWidget(controlPanel);
+
+    verticalLayout->addWidget(topWidget, 1);
+
+    // ── Alarm table ─────────────────────────────────────────────
+    alarmTable_ = new QTableWidget(this);
+    alarmTable_->setFixedHeight(kAlarmTableHeight);
+    alarmTable_->setColumnCount(10);
+    alarmTable_->setHorizontalHeaderLabels({
+        "Timestamp", "Tag", "Value", "Min", "Max", "Color",
+        "Enabled", "Direction", "Threshold", "Triggered"
+    });
+    alarmTable_->horizontalHeader()->setStretchLastSection(true);
+    alarmTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    alarmTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    alarmTable_->setAlternatingRowColors(true);
+    alarmTable_->verticalHeader()->hide();
+    verticalLayout->addWidget(alarmTable_);
 
     // ── Register meta-types ─────────────────────────────────────
     qRegisterMetaType<AppMode>();
@@ -98,6 +124,8 @@ MainWindow::MainWindow(const std::string& videoPath)
             this, &MainWindow::setMode);
     connect(worker_, &Worker::finished,
             this, []() { QApplication::quit(); });
+    connect(worker_, &Worker::alarmTriggered,
+            this, &MainWindow::onAlarmTriggered);
 
     // Pages ↔ Worker
     detectionPage_->connectToWorker(worker_);
@@ -161,4 +189,34 @@ void MainWindow::setMode(AppMode mode) {
 
 void MainWindow::setStatus(const QString& message) {
     statusBar()->showMessage(message);
+}
+
+void MainWindow::onAlarmTriggered(int gaugeIdx, bool triggered) {
+    if (!triggered) return;
+
+    const auto& calibData = worker_->calibData();
+    if (gaugeIdx < 0 || gaugeIdx >= calibData.size()) return;
+
+    const auto& data = calibData[gaugeIdx];
+    int row = alarmTable_->rowCount();
+    alarmTable_->insertRow(row);
+
+    QString timestamp = QTime::currentTime().toString("hh:mm:ss.zzz");
+
+    auto setItem = [&](int col, const QString& text) {
+        alarmTable_->setItem(row, col, new QTableWidgetItem(text));
+    };
+
+    setItem(0, timestamp);
+    setItem(1, data.tag);
+    setItem(2, data.value.has_value() ? QString::number(*data.value) : "N/A");
+    setItem(3, QString::number(data.minValue));
+    setItem(4, QString::number(data.maxValue));
+    setItem(5, QString::number(data.colorRgb, 16).rightJustified(6, '0'));
+    setItem(6, data.alarmEnabled ? "Yes" : "No");
+    setItem(7, data.alarmDirection == AlarmDirection::kGreaterThan ? ">" : "<");
+    setItem(8, QString::number(data.alarmThreshold));
+    setItem(9, data.alarmTriggered ? "YES" : "No");
+
+    alarmTable_->scrollToBottom();
 }
