@@ -170,13 +170,12 @@ void Worker::HandleDetectionClick(int x, int y) {
     int n = static_cast<int>(det_.manualEdges.size());
 
     bool created = false;
-    auto color = Gauge::NextColor();
     switch (det_.activeType) {
         case GaugeType::kEdgewise: {
             auto roi = EdgewiseGauge::FitFromManualEdges(det_.manualEdges);
             if (roi) {
                 det_.gauges.push_back(
-                    std::make_unique<EdgewiseGauge>(*roi, color));
+                    std::make_unique<EdgewiseGauge>(*roi, Gauge::NextColor()));
                 det_.gauges.back()->set_manual(true);
                 created = true;
             }
@@ -186,7 +185,7 @@ void Worker::HandleDetectionClick(int x, int y) {
             auto roi = CircularGauge::FitFromManualEdges(det_.manualEdges);
             if (roi && !roi->H.empty()) {
                 auto g = std::make_unique<CircularGauge>(
-                    roi->center, roi->radius, color);
+                    roi->center, roi->radius, Gauge::NextColor());
                 g->SetHomography(roi->H, roi->outSize, roi->center, roi->ellipse);
                 g->set_manual(true);
                 det_.gauges.push_back(std::move(g));
