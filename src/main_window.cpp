@@ -208,13 +208,13 @@ void MainWindow::onAlarmTriggered(int gaugeIdx, bool triggered) {
     setItem(0, timestamp);
     setItem(1, data.tag);
     setItem(2, data.value.has_value() ? QString::number(*data.value) : "N/A");
-    setItem(3, QString::number(data.minValue));
-    setItem(4, QString::number(data.maxValue));
-    setItem(5, QString::number(data.colorRgb, 16).rightJustified(6, '0'));
-    setItem(6, data.alarmEnabled ? "Yes" : "No");
-    setItem(7, data.alarmDirection == AlarmDirection::kGreaterThan ? ">" : "<");
-    setItem(8, QString::number(data.alarmThreshold));
-    setItem(9, data.alarmTriggered ? "YES" : "No");
+    setItem(3, QString::number(data.min_value));
+    setItem(4, QString::number(data.max_value));
+    setItem(5, QString::number(data.color_rgb, 16).rightJustified(6, '0'));
+    setItem(6, data.alarm_enabled ? "Yes" : "No");
+    setItem(7, data.alarm_direction == AlarmDirection::kGreaterThan ? ">" : "<");
+    setItem(8, QString::number(data.alarm_threshold));
+    setItem(9, data.alarm_triggered ? "YES" : "No");
 
     alarmTable_->scrollToBottom();
 

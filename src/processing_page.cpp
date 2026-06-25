@@ -62,7 +62,7 @@ void ProcessingPage::createCollapsibleSections(const QVector<GaugeCalibData>& ca
 void ProcessingPage::onLiveValuesUpdated(const QVector<GaugeCalibData>& calib) {
     for (size_t i = 0; i < sections_.size() && i < static_cast<size_t>(calib.size()); i++) {
         sections_[i].section->setTitle(
-            gaugeTitle(i, calib[i].value, calib[i].alarmTriggered));
+            gaugeTitle(i, calib[i].value, calib[i].alarm_triggered));
     }
 }
 

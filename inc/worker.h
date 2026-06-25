@@ -20,13 +20,13 @@
 
 struct GaugeCalibData {
     std::optional<double> value = std::nullopt;
-    double minValue = 0;
-    double maxValue = 1000;
-    uint32_t colorRgb = 0x00FF00;
-    bool alarmEnabled = false;
-    AlarmDirection alarmDirection = AlarmDirection::kGreaterThan;
-    double alarmThreshold = 0;
-    bool alarmTriggered = false;
+    double min_value = 0;
+    double max_value = 1000;
+    uint32_t color_rgb = 0x00FF00;
+    bool alarm_enabled = false;
+    AlarmDirection alarm_direction = AlarmDirection::kGreaterThan;
+    double alarm_threshold = 0;
+    bool alarm_triggered = false;
     QString tag;
 };
 

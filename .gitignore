@@ -6,3 +6,6 @@ build/
 resources/
 
 vcpkg_installed/
+
+# Doxygen
+docs/

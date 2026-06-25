@@ -283,9 +283,9 @@ void Worker::refreshCalibData() {
     auto out = calibData_.begin();
     for (const auto& d : gauges_) {
         out->value = d->smoothed_value();
-        out->minValue = d->min_value();
-        out->maxValue = d->max_value();
-        out->colorRgb = bgrToRgb(d->color());
+        out->min_value = d->min_value();
+        out->max_value = d->max_value();
+        out->color_rgb = bgrToRgb(d->color());
         out->tag = QString::fromStdString(d->tag());
         ++out;
     }
@@ -295,13 +295,13 @@ void Worker::refreshCalibData() {
 void Worker::updateGaugeValues() {
     for (qsizetype i = 0; i < calibData_.size(); ++i) {
         calibData_[i].value = gauges_[i]->smoothed_value();
-        calibData_[i].alarmEnabled = gauges_[i]->alarm_enabled();
-        calibData_[i].alarmDirection = gauges_[i]->alarm_direction();
-        calibData_[i].alarmThreshold = gauges_[i]->alarm_threshold();
+        calibData_[i].alarm_enabled = gauges_[i]->alarm_enabled();
+        calibData_[i].alarm_direction = gauges_[i]->alarm_direction();
+        calibData_[i].alarm_threshold = gauges_[i]->alarm_threshold();
 
         bool triggered = gauges_[i]->checkAlarm();
-        if (calibData_[i].alarmTriggered != triggered) {
-            calibData_[i].alarmTriggered = triggered;
+        if (calibData_[i].alarm_triggered != triggered) {
+            calibData_[i].alarm_triggered = triggered;
             emit alarmTriggered(i, triggered);
         }
     }

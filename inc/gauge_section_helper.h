@@ -57,7 +57,7 @@ void rebuildCollapsibleSections(
         auto* sec = new ui::QCollapsibleSection(
             gaugeTitle(i, calib[i].value),
             0, scrollContent);
-        sec->setColorSwatch("\u25A0", QColor::fromRgb(calib[i].colorRgb));
+        sec->setColorSwatch("\u25A0", QColor::fromRgb(calib[i].color_rgb));
         sec->setStyleSheet(
             "ui--QCollapsibleSection { background: #2a2a32; border-radius: 4px; }"
             "ui--QCollapsibleSection QToolButton { color: black; }");
@@ -83,7 +83,7 @@ void rebuildCollapsibleSections(
         auto* minSpin = new QDoubleSpinBox();
         minSpin->setRange(-99999, 99999);
         minSpin->setDecimals(1);
-        minSpin->setValue(calib[i].minValue);
+        minSpin->setValue(calib[i].min_value);
         minLay->addWidget(minSpin, 1);
         cl->addWidget(minRow);
 
@@ -94,7 +94,7 @@ void rebuildCollapsibleSections(
         auto* maxSpin = new QDoubleSpinBox();
         maxSpin->setRange(-99999, 99999);
         maxSpin->setDecimals(1);
-        maxSpin->setValue(calib[i].maxValue);
+        maxSpin->setValue(calib[i].max_value);
         maxLay->addWidget(maxSpin, 1);
         cl->addWidget(maxRow);
 
@@ -106,7 +106,7 @@ void rebuildCollapsibleSections(
         alarmDirCombo->addItem("<");
         alarmDirCombo->addItem(">");
         alarmDirCombo->setCurrentIndex(
-            calib[i].alarmDirection == AlarmDirection::kGreaterThan ? 0 : 1);
+            calib[i].alarm_direction == AlarmDirection::kGreaterThan ? 0 : 1);
         alarmDirLay->addWidget(alarmDirCombo, 1);
         cl->addWidget(alarmDirRow);
 
@@ -117,7 +117,7 @@ void rebuildCollapsibleSections(
         auto* alarmThresholdSpin = new QDoubleSpinBox();
         alarmThresholdSpin->setRange(-99999, 99999);
         alarmThresholdSpin->setDecimals(1);
-        alarmThresholdSpin->setValue(calib[i].alarmThreshold);
+        alarmThresholdSpin->setValue(calib[i].alarm_threshold);
         alarmThreshLay->addWidget(alarmThresholdSpin, 1);
         cl->addWidget(alarmThreshRow);
 
@@ -125,7 +125,7 @@ void rebuildCollapsibleSections(
         auto* alarmEnableLay = new QHBoxLayout(alarmEnableRow);
         alarmEnableLay->setContentsMargins(0, 0, 0, 0);
         auto* alarmEnableCheck = new QCheckBox("Enable alarm");
-        alarmEnableCheck->setChecked(calib[i].alarmEnabled);
+        alarmEnableCheck->setChecked(calib[i].alarm_enabled);
         alarmEnableLay->addWidget(alarmEnableCheck);
         alarmEnableLay->addStretch();
         cl->addWidget(alarmEnableRow);
