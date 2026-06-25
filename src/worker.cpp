@@ -15,19 +15,6 @@ uint32_t bgrToRgb(const cv::Scalar& c) {
            static_cast<uint32_t>(c[0]);
 }
 
-void drawDashedCircle(cv::Mat& img, cv::Point center, int radius,
-                      cv::Scalar color, int thickness) {
-    constexpr int kSegments = 20;
-    constexpr double kDashAngle = 2.0 * kPi / kSegments;
-    for (int i = 0; i < kSegments; i += 2) {
-        double a0 = i * kDashAngle;
-        double a1 = (i + 1) * kDashAngle;
-        cv::ellipse(img, center, cv::Size(radius, radius), 0,
-                    a0 * 180.0 / kPi, a1 * 180.0 / kPi,
-                    color, thickness);
-    }
-}
-
 void drawAllGauges(cv::Mat& img, const std::vector<std::unique_ptr<Gauge>>& detectors) {
     for (const auto& g : detectors)
         g->DrawOutline(img);
@@ -100,7 +87,7 @@ void Worker::displayDetectionOverlay() {
         g->DrawOutline(disp);
     }
     emit frameReady(matToQImage(disp));
-    emit detectionCountChanged(det_.gauges.size());
+    emit detectionCountChanged(static_cast<int>(det_.gauges.size()));
 }
 
 void Worker::detectGauges(bool onlyActiveType) {
@@ -154,7 +141,7 @@ void Worker::setManualPlacement(bool enabled) {
         emit manualInstructionChanged(0);
     }
     emit manualPlacementActivated(enabled);
-    emit detectionCountChanged(det_.gauges.size());
+    emit detectionCountChanged(static_cast<int>(det_.gauges.size()));
 }
 
 void Worker::setCanny(int value) {
@@ -238,14 +225,14 @@ void Worker::handleDetectionClick(int x, int y) {
     }
 
     emit frameReady(matToQImage(disp));
-    emit detectionCountChanged(det_.gauges.size());
+    emit detectionCountChanged(static_cast<int>(det_.gauges.size()));
 }
 
 void Worker::handleCalibrationClick(int x, int y) {
     // Hit-test markers on all gauges and start drag if a marker was hit
     for (size_t i = 0; i < gauges_.size(); i++) {
-        int hit = gauges_[i]->HandleClick(x, y);
-        if (hit != Gauge::kMarkerNone) {
+        CalibrationMarker hit = gauges_[i]->HandleClick(x, y);
+        if (hit != CalibrationMarker::kNone) {
             cal_.draggingGaugeIdx = static_cast<int>(i);
             cal_.draggingMarker = hit;
             break;
@@ -302,7 +289,7 @@ void Worker::updateGaugeValues() {
         bool triggered = gauges_[i]->checkAlarm();
         if (calibData_[i].alarm_triggered != triggered) {
             calibData_[i].alarm_triggered = triggered;
-            emit alarmTriggered(i, triggered);
+            emit alarmTriggered(static_cast<int>(i), triggered);
         }
     }
     emit liveValuesUpdated(calibData_);
@@ -331,7 +318,7 @@ void Worker::confirmGauges() {
     });
 
     for (auto& g : det_.gauges) {
-        int num = gauges_.size() + 1;
+        int num = static_cast<int>(gauges_.size()) + 1;
         qDebug() << "Gauge" << num
                   << "at (" << g->roi().center.x << ","
                   << g->roi().center.y << ")"
@@ -481,7 +468,7 @@ void Worker::timerEvent(QTimerEvent* event) {
 // ═══════════════════════════════════════════════════════════════════
 
 void Worker::onDragMove(int x, int y) {
-    if (cal_.draggingMarker == Gauge::kMarkerNone) return;
+    if (cal_.draggingMarker == CalibrationMarker::kNone) return;
     if (mode_ != AppMode::kCalibration) return;
     if (cal_.draggingGaugeIdx < 0 ||
         static_cast<size_t>(cal_.draggingGaugeIdx) >= gauges_.size())
@@ -493,7 +480,7 @@ void Worker::onDragMove(int x, int y) {
 }
 
 void Worker::onDragRelease() {
-    cal_.draggingMarker = Gauge::kMarkerNone;
+    cal_.draggingMarker = CalibrationMarker::kNone;
     cal_.draggingGaugeIdx = -1;
 }
 

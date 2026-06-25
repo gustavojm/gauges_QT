@@ -192,10 +192,10 @@ void MainWindow::setStatus(const QString& message) {
 void MainWindow::onAlarmTriggered(int gaugeIdx, bool triggered) {
     if (!triggered) return;
 
-    const auto& calibData = worker_->calibData();
-    if (gaugeIdx < 0 || gaugeIdx >= calibData.size()) return;
+    const auto& calibDataVector = worker_->calibData();
+    if (gaugeIdx < 0 || gaugeIdx >= calibDataVector.size()) return;
 
-    const auto& data = calibData[gaugeIdx];
+    const auto& calibData = calibDataVector[gaugeIdx];
     int row = alarmTable_->rowCount();
     alarmTable_->insertRow(row);
 
@@ -206,15 +206,15 @@ void MainWindow::onAlarmTriggered(int gaugeIdx, bool triggered) {
     };
 
     setItem(0, timestamp);
-    setItem(1, data.tag);
-    setItem(2, data.value.has_value() ? QString::number(*data.value) : "N/A");
-    setItem(3, QString::number(data.min_value));
-    setItem(4, QString::number(data.max_value));
-    setItem(5, QString::number(data.color_rgb, 16).rightJustified(6, '0'));
-    setItem(6, data.alarm_enabled ? "Yes" : "No");
-    setItem(7, data.alarm_direction == AlarmDirection::kGreaterThan ? ">" : "<");
-    setItem(8, QString::number(data.alarm_threshold));
-    setItem(9, data.alarm_triggered ? "YES" : "No");
+    setItem(1, calibData.tag);
+    setItem(2, calibData.value.has_value() ? QString::number(*calibData.value) : "N/A");
+    setItem(3, QString::number(calibData.min_value));
+    setItem(4, QString::number(calibData.max_value));
+    setItem(5, QString::number(calibData.color_rgb, 16).rightJustified(6, '0'));
+    setItem(6, calibData.alarm_enabled ? "Yes" : "No");
+    setItem(7, calibData.alarm_direction == AlarmDirection::kGreaterThan ? ">" : "<");
+    setItem(8, QString::number(calibData.alarm_threshold));
+    setItem(9, calibData.alarm_triggered ? "YES" : "No");
 
     alarmTable_->scrollToBottom();
 

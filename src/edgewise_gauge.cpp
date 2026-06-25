@@ -204,7 +204,6 @@ std::optional<double> EdgewiseGauge::detectDarkNeedle(
     cv::HoughLinesP(edges, lines, 1, CV_PI / 180, 30, 20, 5);
 
     double bestPos = -1;
-    double bestScore = 0;
     int bestLen = 0;
 
     for (const auto& l : lines) {
@@ -326,20 +325,20 @@ void EdgewiseGauge::FinalizeCalibration() {
 //  Calibration Markers — Click / Drag
 // ═══════════════════════════════════════════════════════════════════
 
-int EdgewiseGauge::HandleClick(int clickX, int clickY) {
+CalibrationMarker EdgewiseGauge::HandleClick(int clickX, int clickY) {
     cv::Point click(clickX, clickY);
     int dMin = cvRound(cv::norm(click - pt_min_));
     int dMax = cvRound(cv::norm(click - pt_max_));
 
     if (dMin <= kEdgewiseHitThresh && dMin <= dMax)
-        return kMarkerMin;
+        return CalibrationMarker::kMin;
     if (dMax <= kEdgewiseHitThresh)
-        return kMarkerMax;
-    return kMarkerNone;
+        return CalibrationMarker::kMax;
+    return CalibrationMarker::kNone;
 }
 
-void EdgewiseGauge::MoveMarker(int which, cv::Point click) {
-    auto& pt = (which == kMarkerMin) ? pt_min_ : pt_max_;
+void EdgewiseGauge::MoveMarker(CalibrationMarker which, cv::Point click) {
+    auto& pt = (which == CalibrationMarker::kMin) ? pt_min_ : pt_max_;
 
     if (orientation_ == InstrumentOrientation::kHorizontal) {
         pt.x = std::clamp(click.x,

@@ -1,4 +1,4 @@
-# AGENTS.md — Gauge Reader (Qt6 + OpenCV)
+    # AGENTS.md — Gauge Reader (Qt6 + OpenCV)
 
 ## Build & Run
 
@@ -20,7 +20,7 @@ Build directory is `build/`. Uses CMake template from [cpp-best-practices/cmake_
 **Preset-based build** (uses Ninja):
 ```bash
 cmake --preset unixlike-gcc-debug
-cmake --build out/build/unixlike-gcc-debug
+cmake --build build
 ```
 
 **Interactive configuration** (ccmake):

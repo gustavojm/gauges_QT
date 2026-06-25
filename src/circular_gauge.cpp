@@ -606,7 +606,7 @@ void CircularGauge::DrawCalibrationOverlay(cv::Mat& frame) {
 //  Static helpers
 // ═══════════════════════════════════════════════════════════════════
 
-int CircularGauge::HandleClick(int clickX, int clickY) {
+CalibrationMarker CircularGauge::HandleClick(int clickX, int clickY) {
     int thresh = (std::max)(roi_.radius / 6, static_cast<int>(kHitTestMinThresh));
     cv::Point click(clickX, clickY);
 
@@ -651,12 +651,12 @@ int CircularGauge::HandleClick(int clickX, int clickY) {
 
     int dMin = cvRound(cv::norm(click - ptMinTarget));
     int dMax = cvRound(cv::norm(click - ptMaxTarget));
-    int hit = kMarkerNone;
+    CalibrationMarker hit = CalibrationMarker::kNone;
     if (dMin <= thresh && dMin <= dMax)
-        hit = kMarkerMin;
+        hit = CalibrationMarker::kMin;
     else if (dMax <= thresh)
-        hit = kMarkerMax;
-    if (hit != kMarkerNone) {
+        hit = CalibrationMarker::kMax;
+    if (hit != CalibrationMarker::kNone) {
         MoveMarker(hit, click);
     }
     return hit;
@@ -688,7 +688,7 @@ CircularGauge::CircularGauge(const cv::Point& center, int radius,
                                  cvRound(radius * std::sin(a)));
 }
 
-void CircularGauge::MoveMarker(int which, cv::Point click) {
+void CircularGauge::MoveMarker(CalibrationMarker which, cv::Point click) {
     cv::Point onPerimeter;
 
     if (hasHomography_) {
@@ -726,9 +726,9 @@ void CircularGauge::MoveMarker(int which, cv::Point click) {
                                               cvRound(vec.y * scale));
     }
 
-    if (which == kMarkerMin)
+    if (which == CalibrationMarker::kMin)
         pt_min_ = onPerimeter;
-    else if (which == kMarkerMax)
+    else if (which == CalibrationMarker::kMax)
         pt_max_ = onPerimeter;
 }
 

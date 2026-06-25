@@ -17,16 +17,32 @@
 #include "q_collapsible_section.h"
 #include "worker.h"
 
+/**
+ * @struct GaugeSectionWidgets
+ * @brief Bundle of UI widgets for a single gauge's collapsible section.
+ *
+ * Used by CalibrationPage and ProcessingPage to track the per-gauge
+ * controls created by the rebuildCollapsibleSections template.
+ */
 struct GaugeSectionWidgets {
-    ui::QCollapsibleSection* section = nullptr;
-    QDoubleSpinBox* minSpin = nullptr;
-    QDoubleSpinBox* maxSpin = nullptr;
-    QLineEdit* tagEdit = nullptr;
-    QCheckBox* alarmEnableCheck = nullptr;
-    QComboBox* alarmDirCombo = nullptr;
-    QDoubleSpinBox* alarmThresholdSpin = nullptr;
+    ui::QCollapsibleSection* section = nullptr;  ///< The collapsible section container.
+    QDoubleSpinBox* minSpin = nullptr;           ///< Minimum calibration value spinner.
+    QDoubleSpinBox* maxSpin = nullptr;           ///< Maximum calibration value spinner.
+    QLineEdit* tagEdit = nullptr;                ///< Instrument tag text field.
+    QCheckBox* alarmEnableCheck = nullptr;       ///< Alarm enable checkbox.
+    QComboBox* alarmDirCombo = nullptr;          ///< Alarm direction combo box (< / >).
+    QDoubleSpinBox* alarmThresholdSpin = nullptr; ///< Alarm threshold value spinner.
 };
 
+/**
+ * @brief Builds a display title string for a gauge section.
+ *
+ * Includes a warning prefix when the alarm is triggered.
+ * @param index          0-based gauge index.
+ * @param value          Current smoothed gauge value.
+ * @param alarmTriggered True if the alarm is currently triggered.
+ * @return Formatted QString like "Gauge 1: 123.45" or "⚠ Gauge 1: 123.45".
+ */
 inline QString gaugeTitle(int index, const std::optional<double>& value,
                            bool alarmTriggered = false) {
     QString prefix = alarmTriggered ? "\u26A0 " : "";
@@ -37,6 +53,25 @@ inline QString gaugeTitle(int index, const std::optional<double>& value,
             .arg(*value, 0, 'f', 2);
     return QString("%1Gauge %2: ---").arg(prefix).arg(index + 1);
 }
+
+/**
+ * @brief Rebuilds the collapsible section UI for all gauges.
+ *
+ * Destroys existing sections, creates new ones from the calibration data,
+ * and connects all spin boxes, combo boxes, checkboxes, and tag fields
+ * to the page's signals via lambdas.
+ *
+ * @tparam Page  The page class (CalibrationPage or ProcessingPage) that
+ *               owns the signals connected to the Worker.
+ * @param[out] sections      Vector of GaugeSectionWidgets to repopulate.
+ * @param sectionsLayout     QVBoxLayout to which sections are added.
+ * @param scrollContent      Parent widget for the created sections.
+ * @param calib              Current calibration data vector.
+ * @param page               Pointer to the page (used for signal emission).
+ *
+ * @note This is a header-only template function to avoid explicit
+ *       instantiations for each page type.
+ */
 
 template<typename Page>
 void rebuildCollapsibleSections(

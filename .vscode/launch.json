@@ -8,7 +8,7 @@
             "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/gauges",
+            "program": "${workspaceFolder}/build/bin/gauges",
             //"args": ["resources/input_1.mp4"],
             "args": ["resources/edge_wise_horizontal_2.mp4"],
             "stopAtEntry": false,

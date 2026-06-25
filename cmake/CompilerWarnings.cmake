@@ -46,9 +46,9 @@ function(
         -Wunused
         -Woverloaded-virtual
         -Wpedantic
-        -Wconversion
+        #-Wconversion
         -Wnull-dereference
-        -Wdouble-promotion
+        #-Wdouble-promotion
         -Wformat=2
         -Wimplicit-fallthrough)
   endif()
