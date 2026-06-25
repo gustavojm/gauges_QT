@@ -83,27 +83,27 @@ namespace ui
         this->isExpanded_ = expanded;
     }
 
-    void QCollapsibleSection::setContentLayout(QLayout* contentLayout)
+    void QCollapsibleSection::SetContentLayout(QLayout* contentLayout)
     {
         delete contentArea_->layout();
         contentArea_->setLayout(contentLayout);
         collapsedHeight_ = sizeHint().height() - contentArea_->maximumHeight();
         
-        updateHeights();
+        UpdateHeights();
     }
     
-    void QCollapsibleSection::setTitle(QString title)
+    void QCollapsibleSection::SetTitle(QString title)
     {
         toggleButton_->setText(std::move(title));
     }
 
-    void QCollapsibleSection::setColorSwatch(const QString& swatch, const QColor& color)
+    void QCollapsibleSection::SetColorSwatch(const QString& swatch, const QColor& color)
     {
         colorLabel_->setText(swatch);
         colorLabel_->setStyleSheet(QString("color: %1; background: transparent; font-size: 14px;").arg(color.name()));
     }
     
-    void QCollapsibleSection::updateHeights()
+    void QCollapsibleSection::UpdateHeights()
     {
         int contentHeight = contentArea_->layout()->sizeHint().height();
 

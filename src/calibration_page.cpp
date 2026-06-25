@@ -53,17 +53,17 @@ CalibrationPage::CalibrationPage(QWidget* parent)
     lay->addWidget(calBtnRow);
 }
 
-void CalibrationPage::rebuildCollapsibleSections(const QVector<GaugeCalibData>& calib) {
-    ::rebuildCollapsibleSections(sections_, sectionsLayout_, scrollContent_, calib, this);
+void CalibrationPage::RebuildCollapsibleSections(const QVector<GaugeCalibData>& calib) {
+    ::RebuildCollapsibleSections(sections_, sectionsLayout_, scrollContent_, calib, this);
 }
 
 void CalibrationPage::onCalibrationDataReady(const QVector<GaugeCalibData>& calib) {
     if (calib.isEmpty()) return;
     if (sections_.size() != static_cast<size_t>(calib.size()))
-        rebuildCollapsibleSections(calib);
+        RebuildCollapsibleSections(calib);
 }
 
-void CalibrationPage::connectToWorker(Worker* worker) {
+void CalibrationPage::ConnectToWorker(Worker* worker) {
     connect(this, &CalibrationPage::confirmCalibClicked,
             worker, &Worker::confirmCalib);
     connect(this, &CalibrationPage::cancelCalibClicked,
@@ -71,11 +71,11 @@ void CalibrationPage::connectToWorker(Worker* worker) {
     connect(this, &CalibrationPage::gaugeCalibRangeChanged,
             worker, &Worker::setGaugeCalibRange);
     connect(this, &CalibrationPage::alarmEnableChanged,
-            worker, &Worker::set_alarm_enabled);
+            worker, &Worker::setAlarmEnabled);
     connect(this, &CalibrationPage::alarmDirectionChanged,
-            worker, &Worker::set_alarm_direction);
+            worker, &Worker::setAlarmDirection);
     connect(this, &CalibrationPage::alarmThresholdChanged,
-            worker, &Worker::set_alarm_threshold);
+            worker, &Worker::setAlarmThreshold);
     connect(this, &CalibrationPage::tagChanged,
             worker, &Worker::setTag);
     connect(worker, &Worker::calibrationDataReady,

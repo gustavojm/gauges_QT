@@ -109,12 +109,12 @@ std::vector<CircularGauge::ROI> CircularGauge::FindGauges(const cv::Mat& frame,
 
 cv::Mat CircularGauge::CreateMask(const cv::Mat& frame) const {
     cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
-    cv::Point center = detectionCenter();
+    cv::Point center = DetectionCenter();
     cv::circle(mask, center, roi_.radius, cv::Scalar(255), -1);
     return mask;
 }
 
-cv::Point CircularGauge::detectionCenter() const {
+cv::Point CircularGauge::DetectionCenter() const {
     if (hasHomography_)
         return cv::Point(cvRound(rectCenter_.x), cvRound(rectCenter_.y));
     return roi_.center;
@@ -129,7 +129,7 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
     cv::Mat masked;
     frame.copyTo(masked, mask);
 
-    cv::Point center = detectionCenter();
+    cv::Point center = DetectionCenter();
 
     cv::Mat hsv;
     cv::cvtColor(masked, hsv, cv::COLOR_BGR2HSV);
@@ -189,7 +189,7 @@ double CircularGauge::DetectColoredNeedle(const cv::Mat& frame) const {
 
 CircularGauge::RadialScanResult CircularGauge::ScanRadialLine(
     const cv::Mat& binary, const cv::Mat& mask, double angle) const {
-    cv::Point center = detectionCenter();
+    cv::Point center = DetectionCenter();
     int startR = cvRound(roi_.radius * kRadialScanStartFactor);
     int endR = roi_.radius;
     int longestRun = 0, darkRun = 0, totalDark = 0, totalScan = 0;
@@ -736,7 +736,7 @@ void CircularGauge::MoveMarker(CalibrationMarker which, cv::Point click) {
 //  Ellipse-to-Circle Homography
 // ═══════════════════════════════════════════════════════════════════
 
-bool CircularGauge::buildHomographyFromEllipse(float cx, float cy,
+bool CircularGauge::BuildHomographyFromEllipse(float cx, float cy,
                                                float a, float b,
                                                double theta, double R,
                                                cv::Mat& H, cv::Size& outSize) {
@@ -829,7 +829,7 @@ bool CircularGauge::ComputeHomography(const std::vector<cv::Point>& pts,
     }
     R /= static_cast<double>(pts.size());
 
-    if (!buildHomographyFromEllipse(cx, cy, a, b, theta, R, H, outSize))
+    if (!BuildHomographyFromEllipse(cx, cy, a, b, theta, R, H, outSize))
         return false;
 
     ellipseRect = rr;
@@ -852,7 +852,7 @@ bool CircularGauge::HomographyFromEllipse(const cv::RotatedRect& rr,
     // R = average of semi-axes (circle radius in rectified space)
     double R = (a + b) * 0.5;
 
-    return buildHomographyFromEllipse(cx, cy, a, b, theta, R, H, outSize);
+    return BuildHomographyFromEllipse(cx, cy, a, b, theta, R, H, outSize);
 }
 
 void CircularGauge::SetHomography(const cv::Mat& H, const cv::Size& outSize,
@@ -1069,7 +1069,7 @@ void CircularGauge::UpdateROI(const cv::Mat& frame) {
 //  Manual Placement Instructions
 // ═══════════════════════════════════════════════════════════════════
 
-const char* CircularGauge::manualInstruction(int stage) {
+const char* CircularGauge::ManualInstruction(int stage) {
     switch (stage) {
     case 0: return "Click 5 points on the EDGE of the gauge face";
     case 1: return "Edge point 1/5 placed \u2014 click point 2";

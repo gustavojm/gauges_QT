@@ -48,12 +48,12 @@ public:
     ~MainWindow() override;
 
 signals:
-    /// @brief Emitted to request the Worker to shut down.
+    /** @signal Emitted to request the Worker to shut down. */
     void quitRequested();
 
 public slots:
     /**
-     * @brief Updates the status bar message.
+     * @slot Updates the status bar message.
      * @param message  Status text to display.
      */
     void setStatus(const QString& message);
@@ -73,7 +73,7 @@ protected:
 
 private slots:
     /**
-     * @brief Handles an alarm trigger event from the Worker.
+     * @slot Handles an alarm trigger event from the Worker.
      * @param gaugeIdx  0-based index of the gauge.
      * @param triggered True if the alarm just triggered.
      */
@@ -84,7 +84,7 @@ private:
      * @brief Switches the visible page and updates the status bar.
      * @param mode  Target AppMode.
      */
-    void setMode(AppMode mode);
+    void SetMode(AppMode mode);
 
     QPointer<Worker> worker_ = nullptr;       ///< Pointer to the processing worker.
     QThread* workerThread_ = nullptr;         ///< Dedicated thread for the Worker.

@@ -235,7 +235,7 @@ public:
      * @param stage  0-based stage index (0..4).
      * @return Human-readable instruction C-string.
      */
-    static const char* manualInstruction(int stage);
+    static const char* ManualInstruction(int stage);
 
     /**
      * @brief Fits a circular gauge from manually clicked edge points.
@@ -281,7 +281,7 @@ private:
      * @param[out] outSize  Output image size.
      * @return True on success.
      */
-    static bool buildHomographyFromEllipse(float cx, float cy,
+    static bool BuildHomographyFromEllipse(float cx, float cy,
                                            float a, float b,
                                            double theta, double R,
                                            cv::Mat& H, cv::Size& outSize);
@@ -302,7 +302,7 @@ private:
      * otherwise returns roi_.center.
      * @return Detection-space center point.
      */
-    cv::Point detectionCenter() const;
+    cv::Point DetectionCenter() const;
 
     /**
      * @brief Detects a coloured (red) needle via HSV segmentation.

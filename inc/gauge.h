@@ -132,7 +132,7 @@ public:
      * @brief Sets the user-defined tag (instrument identifier) for this gauge.
      * @param tag  Tag string, e.g. "64323-PI-165".
      */
-    void setTag(const std::string& tag) { tag_ = tag; }
+    void set_tag(const std::string& tag) { tag_ = tag; }
 
     /**
      * @brief Returns the user-defined tag for this gauge.
@@ -232,7 +232,7 @@ public:
      * @brief Evaluates whether the alarm should trigger based on the current smoothed value.
      * @return True if the alarm condition is met.
      */
-    bool checkAlarm() const;
+    bool CheckAlarm() const;
 
     // ─── Motion State Reset ───────────────────────────────────────
 

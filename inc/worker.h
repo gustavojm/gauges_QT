@@ -98,84 +98,84 @@ public:
     ~Worker() override;
 
 signals:
-    /// @brief Emitted when a processed frame is ready for display.
+    /** @signal Emitted when a processed frame is ready for display. */
     void frameReady(const QImage& image);
 
-    /// @brief Emitted when calibration data is ready (entire vector refreshed).
+    /** @signal Emitted when calibration data is ready (entire vector refreshed). */
     void calibrationDataReady(const QVector<GaugeCalibData>& calib);
 
-    /// @brief Emitted when live gauge values are updated during processing.
+    /** @signal Emitted when live gauge values are updated during processing. */
     void liveValuesUpdated(const QVector<GaugeCalibData>& calib);
 
-    /// @brief Emitted when the current frame count changes.
+    /** @signal Emitted when the current frame count changes. */
     void frameCountUpdated(int current, int total);
 
-    /// @brief Emitted when the number of detected gauges changes.
+    /** @signal Emitted when the number of detected gauges changes. */
     void detectionCountChanged(int numGauges);
 
-    /// @brief Emitted when the operating mode changes.
+    /** @signal Emitted when the operating mode changes. */
     void modeChanged(AppMode mode);
 
-    /// @brief Emitted when manual placement mode is toggled.
+    /** @signal Emitted when manual placement mode is toggled. */
     void manualPlacementActivated(bool active);
 
-    /// @brief Emitted when the manual placement instruction stage changes.
+    /** @signal Emitted when the manual placement instruction stage changes. */
     void manualInstructionChanged(int stage);
 
-    /// @brief Emitted when the active gauge type is changed.
+    /** @signal Emitted when the active gauge type is changed. */
     void gaugeTypeChanged(int typeIndex);
 
-    /// @brief Emitted when processing finishes (end of video or quit).
+    /** @signal Emitted when processing finishes (end of video or quit). */
     void finished();
 
-    /// @brief Emitted when an alarm triggers or clears on a gauge.
+    /** @signal Emitted when an alarm triggers or clears on a gauge. */
     void alarmTriggered(int gaugeIdx, bool triggered);
 
 public slots:
     /**
-     * @brief Opens the video and starts the detection phase.
+     * @slot Opens the video and starts the detection phase.
      *
      * Invoked on the worker thread after QThread::started.
      */
     void start();
 
     /**
-     * @brief Handles a mouse click on the video frame.
+     * @slot Handles a mouse click on the video frame.
      * @param x  X coordinate in image space.
      * @param y  Y coordinate in image space.
      */
     void onImageClicked(int x, int y);
 
     /**
-     * @brief Toggles manual placement mode during detection.
+     * @slot Toggles manual placement mode during detection.
      * @param enabled  True to enter manual placement mode.
      */
     void setManualPlacement(bool enabled);
 
     /**
-     * @brief Sets the active gauge type for automatic detection.
+     * @slot Sets the active gauge type for automatic detection.
      * @param type  GaugeType::kCircular or kEdgewise.
      */
     void setGaugeType(GaugeType type);
 
     /**
-     * @brief Updates the Canny edge threshold and re-runs detection.
+     * @slot Updates the Canny edge threshold and re-runs detection.
      * @param value  New Canny threshold.
      */
     void setCanny(int value);
 
     /**
-     * @brief Confirms the detected gauges and enters calibration mode.
+     * @slot Confirms the detected gauges and enters calibration mode.
      */
     void confirmGauges();
 
     /**
-     * @brief Confirms calibration and enters processing mode.
+     * @slot Confirms calibration and enters processing mode.
      */
     void confirmCalib();
 
     /**
-     * @brief Sets the calibration value range for a specific gauge.
+     * @slot Sets the calibration value range for a specific gauge.
      * @param idx    0-based gauge index.
      * @param minVal Minimum scale value.
      * @param maxVal Maximum scale value.
@@ -183,52 +183,52 @@ public slots:
     void setGaugeCalibRange(int idx, double minVal, double maxVal);
 
     /**
-     * @brief Enables or disables the alarm for a specific gauge.
+     * @slot Enables or disables the alarm for a specific gauge.
      * @param idx      0-based gauge index.
      * @param enabled  True to enable the alarm.
      */
-    void set_alarm_enabled(int idx, bool enabled);
+    void setAlarmEnabled(int idx, bool enabled);
 
     /**
-     * @brief Sets the alarm comparison direction for a specific gauge.
+     * @slot Sets the alarm comparison direction for a specific gauge.
      * @param idx        0-based gauge index.
      * @param direction  AlarmDirection value.
      */
-    void set_alarm_direction(int idx, AlarmDirection direction);
+    void setAlarmDirection(int idx, AlarmDirection direction);
 
     /**
-     * @brief Sets the alarm threshold for a specific gauge.
+     * @slot Sets the alarm threshold for a specific gauge.
      * @param idx        0-based gauge index.
      * @param threshold  Alarm threshold value.
      */
-    void set_alarm_threshold(int idx, double threshold);
+    void setAlarmThreshold(int idx, double threshold);
 
     /**
-     * @brief Sets the user-defined tag for a specific gauge.
+     * @slot Sets the user-defined tag for a specific gauge.
      * @param idx  0-based gauge index.
      * @param tag  Instrument tag string.
      */
     void setTag(int idx, const QString& tag);
 
     /**
-     * @brief Handles mouse drag movement for marker adjustment.
+     * @slot Handles mouse drag movement for marker adjustment.
      * @param x  X coordinate in image space.
      * @param y  Y coordinate in image space.
      */
     void onDragMove(int x, int y);
 
     /**
-     * @brief Handles mouse release after dragging a marker.
+     * @slot Handles mouse release after dragging a marker.
      */
     void onDragRelease();
 
     /**
-     * @brief Restarts video playback from the beginning during processing.
+     * @slot Restarts video playback from the beginning during processing.
      */
     void restart();
 
     /**
-     * @brief Stops processing, releases resources, and quits the worker thread.
+     * @slot Stops processing, releases resources, and quits the worker thread.
      */
     void quit();
 
@@ -236,7 +236,7 @@ public slots:
      * @brief Returns a copy of the current calibration data vector.
      * @return QVector of GaugeCalibData for all confirmed gauges.
      */
-    QVector<GaugeCalibData> calibData() const { return calibData_; }
+    QVector<GaugeCalibData> calib_data() const { return calibData_; }
 
 private:
     /**

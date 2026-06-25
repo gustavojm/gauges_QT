@@ -43,7 +43,7 @@ struct GaugeSectionWidgets {
  * @param alarmTriggered True if the alarm is currently triggered.
  * @return Formatted QString like "Gauge 1: 123.45" or "⚠ Gauge 1: 123.45".
  */
-inline QString gaugeTitle(int index, const std::optional<double>& value,
+inline QString GaugeTitle(int index, const std::optional<double>& value,
                            bool alarmTriggered = false) {
     QString prefix = alarmTriggered ? "\u26A0 " : "";
     if (value.has_value())
@@ -74,7 +74,7 @@ inline QString gaugeTitle(int index, const std::optional<double>& value,
  */
 
 template<typename Page>
-void rebuildCollapsibleSections(
+void RebuildCollapsibleSections(
     std::vector<GaugeSectionWidgets>& sections,
     QVBoxLayout* sectionsLayout,
     QWidget* scrollContent,
@@ -90,9 +90,9 @@ void rebuildCollapsibleSections(
 
     for (qsizetype i = 0; i < calib.size(); i++) {
         auto* sec = new ui::QCollapsibleSection(
-            gaugeTitle(i, calib[i].value),
+            GaugeTitle(i, calib[i].value),
             0, scrollContent);
-        sec->setColorSwatch("\u25A0", QColor::fromRgb(calib[i].color_rgb));
+        sec->SetColorSwatch("\u25A0", QColor::fromRgb(calib[i].color_rgb));
         sec->setStyleSheet(
             "ui--QCollapsibleSection { background: #2a2a32; border-radius: 4px; }"
             "ui--QCollapsibleSection QToolButton { color: black; }");
@@ -165,7 +165,7 @@ void rebuildCollapsibleSections(
         alarmEnableLay->addStretch();
         cl->addWidget(alarmEnableRow);
 
-        sec->setContentLayout(cl);
+        sec->SetContentLayout(cl);
         sectionsLayout->addWidget(sec);
 
         QObject::connect(minSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), page,

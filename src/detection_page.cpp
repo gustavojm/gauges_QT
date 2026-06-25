@@ -105,18 +105,18 @@ void DetectionPage::onManualInstructionChanged(int stage) {
     const char* text; 
         switch (type_) {
             case GaugeType::kEdgewise:
-            text = EdgewiseGauge::manualInstruction(stage);
+            text = EdgewiseGauge::ManualInstruction(stage);
             break;
         
             case GaugeType::kCircular:
-            text = EdgewiseGauge::manualInstruction(stage);
+            text = CircularGauge::ManualInstruction(stage);
             break;
         }
     
     instructionLabel_->setText(QString::fromUtf8(text));
 }
 
-void DetectionPage::connectToWorker(Worker* worker) {
+void DetectionPage::ConnectToWorker(Worker* worker) {
     connect(this, &DetectionPage::manualPlacementToggled,
             worker, &Worker::setManualPlacement);
     connect(this, &DetectionPage::gaugeTypeChanged,

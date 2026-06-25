@@ -39,7 +39,7 @@ void VideoWidget::resizeEvent(QResizeEvent*) {
     updateScaled();
 }
 
-static bool widgetToImage(const QImage& image, const QPixmap& scaled,
+static bool WidgetToImage(const QImage& image, const QPixmap& scaled,
                           int w, int h, const QPoint& pos,
                           int& ix, int& iy) {
     if (image.isNull() || scaled.isNull()) return false;
@@ -54,14 +54,14 @@ static bool widgetToImage(const QImage& image, const QPixmap& scaled,
 
 void VideoWidget::mousePressEvent(QMouseEvent* event) {
     int ix, iy;
-    if (widgetToImage(image_, scaled_, width(), height(), event->pos(), ix, iy))
+    if (WidgetToImage(image_, scaled_, width(), height(), event->pos(), ix, iy))
         emit imageClicked(ix, iy);
 }
 
 void VideoWidget::mouseMoveEvent(QMouseEvent* event) {
     if (!(event->buttons() & Qt::LeftButton)) return;
     int ix, iy;
-    if (widgetToImage(image_, scaled_, width(), height(), event->pos(), ix, iy))
+    if (WidgetToImage(image_, scaled_, width(), height(), event->pos(), ix, iy))
         emit mouseMoved(ix, iy);
 }
 

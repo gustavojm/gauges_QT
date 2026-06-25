@@ -9,13 +9,13 @@
 
 namespace {
 
-uint32_t bgrToRgb(const cv::Scalar& c) {
+uint32_t BgrToRgb(const cv::Scalar& c) {
     return (static_cast<uint32_t>(c[2]) << 16) |
            (static_cast<uint32_t>(c[1]) << 8)  |
            static_cast<uint32_t>(c[0]);
 }
 
-void drawAllGauges(cv::Mat& img, const std::vector<std::unique_ptr<Gauge>>& detectors) {
+void DrawAllGauges(cv::Mat& img, const std::vector<std::unique_ptr<Gauge>>& detectors) {
     for (const auto& g : detectors)
         g->DrawOutline(img);
 }
@@ -253,7 +253,7 @@ void Worker::publishCalibrationDisplay() {
         disp = firstFrame_.clone();
     }
 
-    drawAllGauges(disp, gauges_);
+    DrawAllGauges(disp, gauges_);
 
     for (const auto& d : gauges_)
         d->DrawCalibrationOverlay(disp);
@@ -272,7 +272,7 @@ void Worker::refreshCalibData() {
         out->value = d->smoothed_value();
         out->min_value = d->min_value();
         out->max_value = d->max_value();
-        out->color_rgb = bgrToRgb(d->color());
+        out->color_rgb = BgrToRgb(d->color());
         out->tag = QString::fromStdString(d->tag());
         ++out;
     }
@@ -286,7 +286,7 @@ void Worker::updateGaugeValues() {
         calibData_[i].alarm_direction = gauges_[i]->alarm_direction();
         calibData_[i].alarm_threshold = gauges_[i]->alarm_threshold();
 
-        bool triggered = gauges_[i]->checkAlarm();
+        bool triggered = gauges_[i]->CheckAlarm();
         if (calibData_[i].alarm_triggered != triggered) {
             calibData_[i].alarm_triggered = triggered;
             emit alarmTriggered(static_cast<int>(i), triggered);
@@ -359,24 +359,24 @@ void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
         publishCalibrationDisplay();
 }
 
-void Worker::set_alarm_enabled(int idx, bool enabled) {
+void Worker::setAlarmEnabled(int idx, bool enabled) {
     if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
     gauges_[idx]->set_alarm_enabled(enabled);
 }
 
-void Worker::set_alarm_direction(int idx, AlarmDirection direction) {
+void Worker::setAlarmDirection(int idx, AlarmDirection direction) {
     if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
     gauges_[idx]->set_alarm_direction(direction);
 }
 
-void Worker::set_alarm_threshold(int idx, double threshold) {
+void Worker::setAlarmThreshold(int idx, double threshold) {
     if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
     gauges_[idx]->set_alarm_threshold(threshold);
 }
 
 void Worker::setTag(int idx, const QString& tag) {
     if (idx < 0 || idx >= static_cast<int>(gauges_.size())) return;
-    gauges_[idx]->setTag(tag.toStdString());
+    gauges_[idx]->set_tag(tag.toStdString());
     if (idx < calibData_.size())
         calibData_[idx].tag = tag;
 }

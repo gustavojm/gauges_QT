@@ -37,55 +37,55 @@ public:
      * @brief Connects this page's signals to the Worker's slots.
      * @param worker  Pointer to the Worker instance.
      */
-    void connectToWorker(class Worker* worker);
+    void ConnectToWorker(class Worker* worker);
 
 public slots:
     /**
-     * @brief Updates the frame-count label.
+     * @slot Updates the frame-count label.
      * @param current  Current frame number.
      * @param total    Total number of frames.
      */
     void onFrameCountUpdated(int current, int total);
 
     /**
-     * @brief Rebuilds the collapsible gauge sections from calibration data.
+     * @slot Rebuilds the collapsible gauge sections from calibration data.
      * @param calib  Current calibration data vector.
      */
     void createCollapsibleSections(const QVector<GaugeCalibData>& calib);
 
     /**
-     * @brief Updates the live values displayed in each gauge section.
+     * @slot Updates the live values displayed in each gauge section.
      * @param calib  Current calibration data vector.
      */
     void onLiveValuesUpdated(const QVector<GaugeCalibData>& calib);
 
     /**
-     * @brief Handles an alarm trigger event for visual feedback.
+     * @slot Handles an alarm trigger event for visual feedback.
      * @param gaugeIdx  0-based index of the gauge.
      * @param triggered True if the alarm triggered.
      */
     void onAlarmTriggered(int gaugeIdx, bool triggered);
 
 signals:
-    /// @brief Emitted when the user clicks the restart button.
+    /** @signal Emitted when the user clicks the restart button. */
     void restartClicked();
 
-    /// @brief Emitted when the user clicks the quit button.
+    /** @signal Emitted when the user clicks the quit button. */
     void quitClicked();
 
-    /// @brief Emitted when a gauge's calibration range is changed.
+    /** @signal Emitted when a gauge's calibration range is changed. */
     void gaugeCalibRangeChanged(int idx, double minVal, double maxVal);
 
-    /// @brief Emitted when a gauge's alarm enable state changes.
+    /** @signal Emitted when a gauge's alarm enable state changes. */
     void alarmEnableChanged(int idx, bool enabled);
 
-    /// @brief Emitted when a gauge's alarm direction changes.
+    /** @signal Emitted when a gauge's alarm direction changes. */
     void alarmDirectionChanged(int idx, AlarmDirection direction);
 
-    /// @brief Emitted when a gauge's alarm threshold changes.
+    /** @signal Emitted when a gauge's alarm threshold changes. */
     void alarmThresholdChanged(int idx, double threshold);
 
-    /// @brief Emitted when a gauge's tag is edited.
+    /** @signal Emitted when a gauge's tag is edited. */
     void tagChanged(int idx, const QString& tag);
 
 private:

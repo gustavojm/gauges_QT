@@ -119,16 +119,16 @@ MainWindow::MainWindow(const std::string& videoPath)
     connect(worker_, &Worker::frameReady, this,
             [this](const QImage& img) { videoWidget_->setImage(img); });
     connect(worker_, &Worker::modeChanged,
-            this, &MainWindow::setMode);
+            this, &MainWindow::SetMode);
     connect(worker_, &Worker::finished,
             this, []() { QApplication::quit(); });
     connect(worker_, &Worker::alarmTriggered,
             this, &MainWindow::onAlarmTriggered);
 
     // Pages ↔ Worker
-    detectionPage_->connectToWorker(worker_);
-    calibrationPage_->connectToWorker(worker_);
-    processingPage_->connectToWorker(worker_);
+    detectionPage_->ConnectToWorker(worker_);
+    calibrationPage_->ConnectToWorker(worker_);
+    processingPage_->ConnectToWorker(worker_);
 
     // Video → Worker
     connect(videoWidget_, &VideoWidget::mouseMoved,
@@ -142,7 +142,7 @@ MainWindow::MainWindow(const std::string& videoPath)
     workerThread_->start();
 
     // ── Initial UI state ────────────────────────────────────────
-    setMode(AppMode::kDetection);
+    SetMode(AppMode::kDetection);
 }
 
 MainWindow::~MainWindow() {
@@ -166,7 +166,7 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
     QMainWindow::keyPressEvent(event);
 }
 
-void MainWindow::setMode(AppMode mode) {
+void MainWindow::SetMode(AppMode mode) {
     currentMode_ = mode;
     detectionPage_->setVisible(mode == AppMode::kDetection);
     calibrationPage_->setVisible(mode == AppMode::kCalibration);
@@ -192,7 +192,7 @@ void MainWindow::setStatus(const QString& message) {
 void MainWindow::onAlarmTriggered(int gaugeIdx, bool triggered) {
     if (!triggered) return;
 
-    const auto& calibDataVector = worker_->calibData();
+    const auto& calibDataVector = worker_->calib_data();
     if (gaugeIdx < 0 || gaugeIdx >= calibDataVector.size()) return;
 
     const auto& calibData = calibDataVector[gaugeIdx];

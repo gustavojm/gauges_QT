@@ -37,35 +37,35 @@ public:
      * @brief Connects this page's signals to the Worker's slots.
      * @param worker  Pointer to the Worker instance.
      */
-    void connectToWorker(class Worker* worker);
+    void ConnectToWorker(class Worker* worker);
 
 public slots:
     /**
-     * @brief Rebuilds the collapsible gauge sections from calibration data.
+     * @slot Rebuilds the collapsible gauge sections from calibration data.
      * @param calib  Current calibration data vector.
      */
     void onCalibrationDataReady(const QVector<GaugeCalibData>& calib);
 
 signals:
-    /// @brief Emitted when the user confirms calibration (enters processing).
+    /** @signal Emitted when the user confirms calibration (enters processing). */
     void confirmCalibClicked();
 
-    /// @brief Emitted when the user cancels calibration (returns to detection).
+    /** @signal Emitted when the user cancels calibration (returns to detection). */
     void cancelCalibClicked();
 
-    /// @brief Emitted when a gauge's calibration range is changed.
+    /** @signal Emitted when a gauge's calibration range is changed. */
     void gaugeCalibRangeChanged(int idx, double minVal, double maxVal);
 
-    /// @brief Emitted when a gauge's alarm enable state changes.
+    /** @signal Emitted when a gauge's alarm enable state changes. */
     void alarmEnableChanged(int idx, bool enabled);
 
-    /// @brief Emitted when a gauge's alarm direction changes.
+    /** @signal Emitted when a gauge's alarm direction changes. */
     void alarmDirectionChanged(int idx, AlarmDirection direction);
 
-    /// @brief Emitted when a gauge's alarm threshold changes.
+    /** @signal Emitted when a gauge's alarm threshold changes. */
     void alarmThresholdChanged(int idx, double threshold);
 
-    /// @brief Emitted when a gauge's tag is edited.
+    /** @signal Emitted when a gauge's tag is edited. */
     void tagChanged(int idx, const QString& tag);
 
 private:
@@ -73,7 +73,7 @@ private:
      * @brief Rebuilds the collapsible section UI from calibration data.
      * @param calib  Current calibration data vector.
      */
-    void rebuildCollapsibleSections(const QVector<GaugeCalibData>& calib);
+    void RebuildCollapsibleSections(const QVector<GaugeCalibData>& calib);
 
     QLabel* calibInstruction_ = nullptr;       ///< Instruction label for the user.
     QScrollArea* scrollArea_ = nullptr;        ///< Scroll area for the gauge sections.

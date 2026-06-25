@@ -56,13 +56,13 @@ void ProcessingPage::onFrameCountUpdated(int current, int total) {
 }
 
 void ProcessingPage::createCollapsibleSections(const QVector<GaugeCalibData>& calib) {
-    ::rebuildCollapsibleSections(sections_, sectionsLayout_, scrollContent_, calib, this);
+    ::RebuildCollapsibleSections(sections_, sectionsLayout_, scrollContent_, calib, this);
 }
 
 void ProcessingPage::onLiveValuesUpdated(const QVector<GaugeCalibData>& calib) {
     for (size_t i = 0; i < sections_.size() && i < static_cast<size_t>(calib.size()); i++) {
-        sections_[i].section->setTitle(
-            gaugeTitle(i, calib[i].value, calib[i].alarm_triggered));
+        sections_[i].section->SetTitle(
+            GaugeTitle(i, calib[i].value, calib[i].alarm_triggered));
     }
 }
 
@@ -82,7 +82,7 @@ void ProcessingPage::onAlarmTriggered(int gaugeIdx, bool triggered) {
     }
 }
 
-void ProcessingPage::connectToWorker(Worker* worker) {
+void ProcessingPage::ConnectToWorker(Worker* worker) {
     connect(this, &ProcessingPage::restartClicked,
             worker, &Worker::restart);
     connect(this, &ProcessingPage::quitClicked,
@@ -90,11 +90,11 @@ void ProcessingPage::connectToWorker(Worker* worker) {
     connect(this, &ProcessingPage::gaugeCalibRangeChanged,
             worker, &Worker::setGaugeCalibRange);
     connect(this, &ProcessingPage::alarmEnableChanged,
-            worker, &Worker::set_alarm_enabled);
+            worker, &Worker::setAlarmEnabled);
     connect(this, &ProcessingPage::alarmDirectionChanged,
-            worker, &Worker::set_alarm_direction);
+            worker, &Worker::setAlarmDirection);
     connect(this, &ProcessingPage::alarmThresholdChanged,
-            worker, &Worker::set_alarm_threshold);
+            worker, &Worker::setAlarmThreshold);
     connect(this, &ProcessingPage::tagChanged,
             worker, &Worker::setTag);
     connect(worker, &Worker::calibrationDataReady,

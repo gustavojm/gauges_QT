@@ -34,38 +34,38 @@ public:
      * @brief Connects this page's signals to the Worker's slots.
      * @param worker  Pointer to the Worker instance.
      */
-    void connectToWorker(class Worker* worker);
+    void ConnectToWorker(class Worker* worker);
 
 public slots:
     /**
-     * @brief Updates the detected gauge count label.
+     * @slot Updates the detected gauge count label.
      * @param numGauges  Number of currently detected gauges.
      */
     void onDetectionCountChanged(int numGauges);
 
     /**
-     * @brief Shows or hides the manual-placement instruction label.
+     * @slot Shows or hides the manual-placement instruction label.
      * @param active  True when manual placement is active.
      */
     void onManualPlacementActivated(bool active);
 
     /**
-     * @brief Updates the manual-placement instruction text.
+     * @slot Updates the manual-placement instruction text.
      * @param stage  Current placement stage (0-based).
      */
     void onManualInstructionChanged(int stage);
 
 signals:
-    /// @brief Emitted when the manual placement button is toggled.
+    /** @signal Emitted when the manual placement button is toggled. */
     void manualPlacementToggled(bool checked);
 
-    /// @brief Emitted when the gauge type combo box changes.
+    /** @signal Emitted when the gauge type combo box changes. */
     void gaugeTypeChanged(GaugeType type);
 
-    /// @brief Emitted when the Canny slider value changes.
+    /** @signal Emitted when the Canny slider value changes. */
     void cannyChanged(int value);
 
-    /// @brief Emitted when the user confirms detection (enters calibration).
+    /** @signal Emitted when the user confirms detection (enters calibration). */
     void confirmClicked();
 
 private:

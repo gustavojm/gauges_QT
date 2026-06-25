@@ -78,7 +78,7 @@ void Gauge::ResetSmoothing() {
     smoothed_reading_ = std::nullopt;
 }
 
-bool Gauge::checkAlarm() const {
+bool Gauge::CheckAlarm() const {
     if (!alarm_enabled_ || !smoothed_reading_.has_value())
         return false;
 

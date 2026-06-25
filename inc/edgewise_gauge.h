@@ -138,7 +138,7 @@ public:
      * @param stage  0-based stage index (0..3).
      * @return Human-readable instruction C-string.
      */
-    static const char* manualInstruction(int stage);
+    static const char* ManualInstruction(int stage);
 
     /**
      * @brief Fits an edgewise gauge from manually clicked corner points.
@@ -161,7 +161,7 @@ private:
      * @param roiColor  BGR colour image of the bezel interior.
      * @return Bounding rectangle of the scale strip (relative to ROI).
      */
-    cv::Rect detectScaleStrip(const cv::Mat& roiColor) const;
+    cv::Rect DetectScaleStrip(const cv::Mat& roiColor) const;
 
     /**
      * @brief Detects the needle position within the bezel ROI.
@@ -170,26 +170,26 @@ private:
      * @param roiColor  BGR colour image of the bezel interior.
      * @return Needle position along the scale axis, or std::nullopt.
      */
-    std::optional<double> detectNeedlePosition(const cv::Mat& roiColor) const;
+    std::optional<double> DetectNeedlePosition(const cv::Mat& roiColor) const;
 
     /**
      * @brief Detects a red needle via HSV colour segmentation.
      * @param roiHsv  HSV colour image of the bezel interior.
      * @return Needle centroid position along the scale axis, or std::nullopt.
      */
-    std::optional<double> detectRedNeedle(const cv::Mat& roiHsv) const;
+    std::optional<double> DetectRedNeedle(const cv::Mat& roiHsv) const;
 
     /**
      * @brief Detects a dark needle via Hough line detection.
      * @param roiGray  Grayscale image of the bezel interior.
      * @return Needle position along the scale axis, or std::nullopt.
      */
-    std::optional<double> detectDarkNeedle(const cv::Mat& roiGray) const;
+    std::optional<double> DetectDarkNeedle(const cv::Mat& roiGray) const;
 
     /**
      * @brief Maps a needle pixel position to a gauge value.
      * @param needlePos  Needle position along the scale axis (pixels).
      * @return Mapped gauge value within [min_value_, max_value_].
      */
-    double positionToValue(double needlePos) const;
+    double PositionToValue(double needlePos) const;
 };

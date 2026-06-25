@@ -35,13 +35,13 @@ public:
     void setImage(const QImage& img);
 
 signals:
-    /// @brief Emitted when the user clicks on the image.
+    /** @signal Emitted when the user clicks on the image. */
     void imageClicked(int imageX, int imageY);
 
-    /// @brief Emitted when the user drags the mouse over the image.
+    /** @signal Emitted when the user drags the mouse over the image. */
     void mouseMoved(int imageX, int imageY);
 
-    /// @brief Emitted when the user releases the mouse button.
+    /** @signal Emitted when the user releases the mouse button. */
     void imageMouseReleased();
 
 protected:

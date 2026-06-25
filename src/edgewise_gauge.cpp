@@ -117,7 +117,7 @@ std::vector<cv::Rect> EdgewiseGauge::FindGauges(const cv::Mat& frame,
 //  Scale Strip Detection (Stage 2)
 // ═══════════════════════════════════════════════════════════════════
 
-cv::Rect EdgewiseGauge::detectScaleStrip(const cv::Mat& roiColor) const {
+cv::Rect EdgewiseGauge::DetectScaleStrip(const cv::Mat& roiColor) const {
     cv::Mat hsv;
     cv::cvtColor(roiColor, hsv, cv::COLOR_BGR2HSV);
 
@@ -143,7 +143,7 @@ cv::Rect EdgewiseGauge::detectScaleStrip(const cv::Mat& roiColor) const {
 //  Needle Detection — Red (color segmentation)
 // ═══════════════════════════════════════════════════════════════════
 
-std::optional<double> EdgewiseGauge::detectRedNeedle(
+std::optional<double> EdgewiseGauge::DetectRedNeedle(
     const cv::Mat& roiHsv) const {
     cv::Mat mask1, mask2, needleMask;
     cv::inRange(roiHsv, cv::Scalar(0, 100, 100), cv::Scalar(10, 255, 255),
@@ -192,7 +192,7 @@ std::optional<double> EdgewiseGauge::detectRedNeedle(
 //  Needle Detection — Dark (Hough lines)
 // ═══════════════════════════════════════════════════════════════════
 
-std::optional<double> EdgewiseGauge::detectDarkNeedle(
+std::optional<double> EdgewiseGauge::DetectDarkNeedle(
     const cv::Mat& roiGray) const {
     cv::Mat blurred;
     cv::GaussianBlur(roiGray, blurred, cv::Size(3, 3), 0);
@@ -246,25 +246,25 @@ std::optional<double> EdgewiseGauge::detectDarkNeedle(
 //  Needle Detection — Orchestrator
 // ═══════════════════════════════════════════════════════════════════
 
-std::optional<double> EdgewiseGauge::detectNeedlePosition(
+std::optional<double> EdgewiseGauge::DetectNeedlePosition(
     const cv::Mat& roiColor) const {
     cv::Mat hsv;
     cv::cvtColor(roiColor, hsv, cv::COLOR_BGR2HSV);
 
-    auto pos = detectRedNeedle(hsv);
+    auto pos = DetectRedNeedle(hsv);
     if (pos.has_value())
         return pos;
 
     cv::Mat gray;
     cv::cvtColor(roiColor, gray, cv::COLOR_BGR2GRAY);
-    return detectDarkNeedle(gray);
+    return DetectDarkNeedle(gray);
 }
 
 // ═══════════════════════════════════════════════════════════════════
 //  Value Mapping (Stage 4)
 // ═══════════════════════════════════════════════════════════════════
 
-double EdgewiseGauge::positionToValue(double needlePos) const {
+double EdgewiseGauge::PositionToValue(double needlePos) const {
     double scaleStart, scaleEnd;
     if (orientation_ == InstrumentOrientation::kHorizontal) {
         scaleStart = scaleStrip_.x;
@@ -298,14 +298,14 @@ std::optional<double> EdgewiseGauge::DetectNeedle(const cv::Mat& frame) {
 
     cv::Mat roi = frame(bezelRect_);
 
-    auto needlePos = detectNeedlePosition(roi);
+    auto needlePos = DetectNeedlePosition(roi);
     if (!needlePos.has_value()) {
         last_reading_ = std::nullopt;
         AddReading(std::nullopt);
         return std::nullopt;
     }
 
-    last_reading_ = positionToValue(*needlePos);
+    last_reading_ = PositionToValue(*needlePos);
     AddReading(last_reading_);
     return last_reading_;
 }
@@ -366,7 +366,7 @@ void EdgewiseGauge::InitMotionFeatures(const cv::Mat& frame) {
         bezelRect_.x + bezelRect_.width <= frame.cols &&
         bezelRect_.y + bezelRect_.height <= frame.rows) {
         cv::Mat roiColor = frame(bezelRect_);
-        scaleStrip_ = detectScaleStrip(roiColor);
+        scaleStrip_ = DetectScaleStrip(roiColor);
 
         // Update calibration markers to detected scale strip edges
         if (orientation_ == InstrumentOrientation::kHorizontal) {
@@ -550,7 +550,7 @@ void EdgewiseGauge::DrawOverlay(cv::Mat& frame, int labelY) const {
 //  Manual Placement Instructions
 // ═══════════════════════════════════════════════════════════════════
 
-const char* EdgewiseGauge::manualInstruction(int stage) {
+const char* EdgewiseGauge::ManualInstruction(int stage) {
     switch (stage) {
     case 0: return "Click 4 CORNERS of the rectangular bezel";
     case 1: return "Corner 1/4 placed \u2014 click corner 2";

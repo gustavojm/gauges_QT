@@ -58,10 +58,10 @@ namespace ui
         
     public slots:
         /**
-         * @brief Toggles the section between expanded and collapsed states.
-         * @param collapsed  If true, forces collapse; if false, forces expand.
+         * @slot Toggles the section between expanded and collapsed states.
+         * @param expanded  If true, forces expand, if false, forces collapse.
          */
-        void toggle(bool collapsed);
+        void toggle(bool expanded);
 
     public:
         /// Default animation duration (0 = instant).
@@ -79,25 +79,25 @@ namespace ui
          * @brief Sets the content layout (takes ownership of the layout and its children).
          * @param contentLayout  Layout to place inside the collapsible area.
          */
-        void setContentLayout(QLayout* contentLayout);
+        void SetContentLayout(QLayout* contentLayout);
         
         /**
          * @brief Updates the header title text.
          * @param title  New title string.
          */
-        void setTitle(QString title);
+        void SetTitle(QString title);
 
         /**
          * @brief Sets a colour swatch character and colour in the header.
          * @param swatch  Single character to display (e.g. "■").
          * @param color   Background colour for the swatch.
          */
-        void setColorSwatch(const QString& swatch, const QColor& color);
+        void SetColorSwatch(const QString& swatch, const QColor& color);
         
         /**
          * @brief Recalculates animation heights after content changes.
          */
-        void updateHeights();
+        void UpdateHeights();
     };
 }
 
