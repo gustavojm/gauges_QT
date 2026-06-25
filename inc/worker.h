@@ -248,7 +248,7 @@ private:
     /**
      * @brief Processes the next video frame (needle detection, overlay, emit).
      */
-    void processNextFrame();
+    void ProcessNextFrame();
 
     // Mode-specific click handlers
     /**
@@ -256,62 +256,62 @@ private:
      * @param x  X coordinate.
      * @param y  Y coordinate.
      */
-    void handleDetectionClick(int x, int y);
+    void HandleDetectionClick(int x, int y);
 
     /**
      * @brief Handles a click during calibration mode (marker hit-test).
      * @param x  X coordinate.
      * @param y  Y coordinate.
      */
-    void handleCalibrationClick(int x, int y);
+    void HandleCalibrationClick(int x, int y);
 
     /**
      * @brief Converts an OpenCV BGR Mat to a QImage for display.
      * @param bgr  BGR input image.
      * @return QImage in RGB888 format (deep copy).
      */
-    static QImage matToQImage(const cv::Mat& bgr);
+    static QImage MatToQImage(const cv::Mat& bgr);
 
     /**
      * @brief Renders the detection overlay on the first frame and emits frameReady.
      */
-    void displayDetectionOverlay();
+    void DisplayDetectionOverlay();
 
     /**
      * @brief Runs automatic gauge detection on the first frame.
      * @param onlyActiveType  If true, only detect the currently selected type.
      */
-    void detectGauges(bool onlyActiveType = false);
+    void DetectGauges(bool onlyActiveType = false);
 
     /**
      * @brief Re-runs detection while preserving manually placed gauges.
      */
-    void reRunDetection();
+    void ReRunDetection();
 
     /**
      * @brief Publishes the calibration overlay frame and data to the GUI.
      */
-    void publishCalibrationDisplay();
+    void PublishCalibrationDisplay();
 
     /**
      * @brief Transitions from detection to calibration mode.
      */
-    void enterCalibration();
+    void EnterCalibration();
 
     /**
      * @brief Transitions from calibration to processing mode.
      */
-    void enterProcessing();
+    void EnterProcessing();
 
     /**
      * @brief Rebuilds the calibData_ vector from the current gauge state.
      */
-    void refreshCalibData();
+    void RefreshCalibData();
 
     /**
      * @brief Updates live gauge values and checks alarm conditions.
      */
-    void updateGaugeValues();
+    void UpdateGaugeValues();
 
     std::string videoPath_;              ///< Path to the input video file.
     cv::VideoCapture cap_;               ///< OpenCV video capture handle.

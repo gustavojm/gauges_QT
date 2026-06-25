@@ -255,13 +255,13 @@ public:
      * @brief Returns and increments the global gauge counter.
      * @return The next gauge number (1-based).
      */
-    static int next_number() { next_number_++; return next_number_; }
+    static int NextNumber() { next_number_++; return next_number_; }
 
     /**
      * @brief Resets the global gauge counter to 1 and returns it.
      * @return 1 (the reset value).
      */
-    static int restart_next_number() { next_number_ = 1; return next_number_; }
+    static int ResetNextNumber() { next_number_ = 1; return next_number_; }
 
     /**
      * @brief Manually sets the gauge identification number.

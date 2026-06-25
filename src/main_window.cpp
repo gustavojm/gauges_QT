@@ -117,7 +117,7 @@ MainWindow::MainWindow(const std::string& videoPath)
 
     // Worker → Main
     connect(worker_, &Worker::frameReady, this,
-            [this](const QImage& img) { videoWidget_->setImage(img); });
+            [this](const QImage& img) { videoWidget_->set_image(img); });
     connect(worker_, &Worker::modeChanged,
             this, &MainWindow::SetMode);
     connect(worker_, &Worker::finished,

@@ -10,13 +10,13 @@ VideoWidget::VideoWidget(QWidget* parent)
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 }
 
-void VideoWidget::setImage(const QImage& img) {
+void VideoWidget::set_image(const QImage& img) {
     image_ = img.copy();
-    updateScaled();
+    UpdateScaled();
     update();
 }
 
-void VideoWidget::updateScaled() {
+void VideoWidget::UpdateScaled() {
     if (image_.isNull()) {
         scaled_ = QPixmap();
         return;
@@ -36,7 +36,7 @@ void VideoWidget::paintEvent(QPaintEvent*) {
 }
 
 void VideoWidget::resizeEvent(QResizeEvent*) {
-    updateScaled();
+    UpdateScaled();
 }
 
 static bool WidgetToImage(const QImage& image, const QPixmap& scaled,

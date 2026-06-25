@@ -40,7 +40,7 @@ Worker::~Worker() {
 //  Helpers
 // ═══════════════════════════════════════════════════════════════════
 
-QImage Worker::matToQImage(const cv::Mat& bgr) {
+QImage Worker::MatToQImage(const cv::Mat& bgr) {
     if (bgr.empty()) return {};
     cv::Mat rgb;
     cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
@@ -72,8 +72,8 @@ void Worker::start() {
         qWarning() << "Could not reset to frame 0 in start()";
 
     det_.gauges.clear();
-    detectGauges();
-    displayDetectionOverlay();
+    DetectGauges();
+    DisplayDetectionOverlay();
     emit modeChanged(AppMode::kDetection);
 }
 
@@ -81,16 +81,16 @@ void Worker::start() {
 //  Detection Mode
 // ═══════════════════════════════════════════════════════════════════
 
-void Worker::displayDetectionOverlay() {
+void Worker::DisplayDetectionOverlay() {
     cv::Mat disp = firstFrame_.clone();
     for (const auto& g : det_.gauges) {
         g->DrawOutline(disp);
     }
-    emit frameReady(matToQImage(disp));
+    emit frameReady(MatToQImage(disp));
     emit detectionCountChanged(static_cast<int>(det_.gauges.size()));
 }
 
-void Worker::detectGauges(bool onlyActiveType) {
+void Worker::DetectGauges(bool onlyActiveType) {
     if (!onlyActiveType || det_.activeType == GaugeType::kCircular) {
         for (const auto& roi : CircularGauge::FindGauges(firstFrame_, det_.canny, 40)) {
             auto g = std::make_unique<CircularGauge>(roi.center, roi.radius,
@@ -106,7 +106,7 @@ void Worker::detectGauges(bool onlyActiveType) {
     }
 }
 
-void Worker::reRunDetection() {
+void Worker::ReRunDetection() {
     std::vector<std::unique_ptr<Gauge>> preserved;
     for (auto& g : det_.gauges) {
         if (g->is_manual()) {
@@ -120,18 +120,18 @@ void Worker::reRunDetection() {
     }
     det_.gauges.clear();
 
-    detectGauges(true);
+    DetectGauges(true);
 
     for (auto& g : preserved)
         det_.gauges.push_back(std::move(g));
    
-    displayDetectionOverlay();
+    DisplayDetectionOverlay();
 }
 
 void Worker::setGaugeType(GaugeType type) {
     det_.activeType = type;
     if (mode_ == AppMode::kDetection && !det_.manualPlacement)
-        reRunDetection();
+        ReRunDetection();
 }
 
 void Worker::setManualPlacement(bool enabled) {
@@ -147,7 +147,7 @@ void Worker::setManualPlacement(bool enabled) {
 void Worker::setCanny(int value) {
     det_.canny = value;
     if (mode_ == AppMode::kDetection && !det_.manualPlacement)
-        reRunDetection();
+        ReRunDetection();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -158,12 +158,12 @@ void Worker::onImageClicked(int x, int y) {
     if (quit_) return;
 
     if (mode_ == AppMode::kDetection && det_.manualPlacement)
-        handleDetectionClick(x, y);
+        HandleDetectionClick(x, y);
     else if (mode_ == AppMode::kCalibration && !gauges_.empty())
-        handleCalibrationClick(x, y);
+        HandleCalibrationClick(x, y);
 }
 
-void Worker::handleDetectionClick(int x, int y) {
+void Worker::HandleDetectionClick(int x, int y) {
     cv::Point click(x, y);
 
     det_.manualEdges.push_back(click);
@@ -224,11 +224,11 @@ void Worker::handleDetectionClick(int x, int y) {
                  cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
     }
 
-    emit frameReady(matToQImage(disp));
+    emit frameReady(MatToQImage(disp));
     emit detectionCountChanged(static_cast<int>(det_.gauges.size()));
 }
 
-void Worker::handleCalibrationClick(int x, int y) {
+void Worker::HandleCalibrationClick(int x, int y) {
     // Hit-test markers on all gauges and start drag if a marker was hit
     for (size_t i = 0; i < gauges_.size(); i++) {
         CalibrationMarker hit = gauges_[i]->HandleClick(x, y);
@@ -238,14 +238,14 @@ void Worker::handleCalibrationClick(int x, int y) {
             break;
         }
     }
-    publishCalibrationDisplay();
+    PublishCalibrationDisplay();
 }
 
 // ═══════════════════════════════════════════════════════════════════
 //  Mode Transitions
 // ═══════════════════════════════════════════════════════════════════
 
-void Worker::publishCalibrationDisplay() {
+void Worker::PublishCalibrationDisplay() {
     cv::Mat disp;
     if (!calibFrame_.empty()) {
         disp = calibFrame_.clone();
@@ -258,14 +258,14 @@ void Worker::publishCalibrationDisplay() {
     for (const auto& d : gauges_)
         d->DrawCalibrationOverlay(disp);
 
-    emit frameReady(matToQImage(disp));
+    emit frameReady(MatToQImage(disp));
 }
 
 // ═══════════════════════════════════════════════════════════════════
 //  Calibration Data
 // ═══════════════════════════════════════════════════════════════════
 
-void Worker::refreshCalibData() {
+void Worker::RefreshCalibData() {
     calibData_.resize(static_cast<int>(gauges_.size()));
     auto out = calibData_.begin();
     for (const auto& d : gauges_) {
@@ -279,7 +279,7 @@ void Worker::refreshCalibData() {
     emit calibrationDataReady(calibData_);
 }
 
-void Worker::updateGaugeValues() {
+void Worker::UpdateGaugeValues() {
     for (qsizetype i = 0; i < calibData_.size(); ++i) {
         calibData_[i].value = gauges_[i]->smoothed_value();
         calibData_[i].alarm_enabled = gauges_[i]->alarm_enabled();
@@ -295,13 +295,13 @@ void Worker::updateGaugeValues() {
     emit liveValuesUpdated(calibData_);
 }
 
-void Worker::enterCalibration() {
+void Worker::EnterCalibration() {
     mode_ = AppMode::kCalibration;
     emit modeChanged(AppMode::kCalibration);
 
-    refreshCalibData();
+    RefreshCalibData();
 
-    publishCalibrationDisplay();
+    PublishCalibrationDisplay();
 }
 
 void Worker::confirmGauges() {
@@ -331,7 +331,7 @@ void Worker::confirmGauges() {
     }
     det_.gauges.clear();
     calibFrame_ = firstFrame_.clone();
-    enterCalibration();
+    EnterCalibration();
 }
 
 void Worker::confirmCalib() {
@@ -348,7 +348,7 @@ void Worker::confirmCalib() {
                       << (s.end_angle * 180.0 / kPi) << "deg";
         }
     }
-    enterProcessing();
+    EnterProcessing();
 }
 
 void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
@@ -356,7 +356,7 @@ void Worker::setGaugeCalibRange(int idx, double minVal, double maxVal) {
     auto& d = gauges_[idx];
     d->SetCalibrationValues(minVal, maxVal);
     if (mode_ == AppMode::kCalibration)
-        publishCalibrationDisplay();
+        PublishCalibrationDisplay();
 }
 
 void Worker::setAlarmEnabled(int idx, bool enabled) {
@@ -385,9 +385,9 @@ void Worker::setTag(int idx, const QString& tag) {
 //  Processing Mode
 // ═══════════════════════════════════════════════════════════════════
 
-void Worker::enterProcessing() {
+void Worker::EnterProcessing() {
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, 0))
-        qWarning() << "Could not reset to frame 0 in enterProcessing()";
+        qWarning() << "Could not reset to frame 0 in EnterProcessing()";
 
     frameCount_ = 0;
     motionInitialized_ = false;
@@ -395,12 +395,12 @@ void Worker::enterProcessing() {
     mode_ = AppMode::kProcessing;
     emit modeChanged(AppMode::kProcessing);
 
-    refreshCalibData();
+    RefreshCalibData();
 
     chainTimer_.start(0, this);
 }
 
-void Worker::processNextFrame() {
+void Worker::ProcessNextFrame() {
     chainTimer_.stop();
     if (quit_ || mode_ != AppMode::kProcessing) return;
 
@@ -431,9 +431,9 @@ void Worker::processNextFrame() {
 
         frameCount_++;
 
-        updateGaugeValues();
+        UpdateGaugeValues();
 
-        emit frameReady(matToQImage(frame));
+        emit frameReady(MatToQImage(frame));
         emit frameCountUpdated(frameCount_, totalFrames_);
 
         chainTimer_.start(0, this);
@@ -460,7 +460,7 @@ void Worker::restart() {
 
 void Worker::timerEvent(QTimerEvent* event) {
     if (event->timerId() == chainTimer_.timerId())
-        processNextFrame();
+        ProcessNextFrame();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -476,7 +476,7 @@ void Worker::onDragMove(int x, int y) {
 
     auto& d = gauges_[static_cast<size_t>(cal_.draggingGaugeIdx)];
     d->MoveMarker(cal_.draggingMarker, cv::Point(x, y));
-    publishCalibrationDisplay();
+    PublishCalibrationDisplay();
 }
 
 void Worker::onDragRelease() {

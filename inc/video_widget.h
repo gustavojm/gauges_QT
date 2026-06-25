@@ -32,7 +32,7 @@ public:
      * @brief Sets the image to display.
      * @param img  QImage in RGB888 format.
      */
-    void setImage(const QImage& img);
+    void set_image(const QImage& img);
 
 signals:
     /** @signal Emitted when the user clicks on the image. */
@@ -82,5 +82,5 @@ private:
     /**
      * @brief Rebuilds the cached scaled pixmap from the current image and widget size.
      */
-    void updateScaled();
+    void UpdateScaled();
 };
